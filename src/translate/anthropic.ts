@@ -78,14 +78,11 @@ export function fromAnthropicToCC(req: AnthropicMessageRequest): CCRequestBody {
     // 'auto' maps to undefined
   }
 
-  const hasTools = req.tools && req.tools.length > 0;
   const noToolsInstruction =
     "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text.";
-  const finalSystemPrompt = hasTools
-    ? req.system
-    : req.system
-      ? `${req.system}\n\n${noToolsInstruction}`
-      : noToolsInstruction;
+  const finalSystemPrompt = req.system
+    ? `${req.system}\n\n${noToolsInstruction}`
+    : noToolsInstruction;
 
   const body: CCRequestBody = {
     config: buildCCConfig(),
@@ -114,7 +111,7 @@ export function fromAnthropicToCC(req: AnthropicMessageRequest): CCRequestBody {
   }
 
   // Also append directly to the last user message as a fallback to bypass upstream overrides
-  if (!hasTools && body.params.messages.length > 0) {
+  if (body.params.messages.length > 0) {
     const messages = body.params.messages;
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === "user") {

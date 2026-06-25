@@ -123,7 +123,6 @@ export function toCCRequest(
 ): CCRequestBody {
   const { ccMessages, systemPrompt } = toCCMessages(req.messages);
   const resolvedModel = resolveModel(req.model);
-  const hasTools = req.tools && req.tools.length > 0;
 
   const body: CCRequestBody = {
     config: buildCCConfig(configOverrides),
@@ -148,18 +147,16 @@ export function toCCRequest(
 
   const noToolsInstruction =
     "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text.";
-  const finalSystemPrompt = hasTools
-    ? systemPrompt
-    : systemPrompt
-      ? `${systemPrompt}\n\n${noToolsInstruction}`
-      : noToolsInstruction;
+  const finalSystemPrompt = systemPrompt
+    ? `${systemPrompt}\n\n${noToolsInstruction}`
+    : noToolsInstruction;
 
   if (finalSystemPrompt) {
     body.params.system = finalSystemPrompt;
   }
 
   // Also append directly to the last user message as a fallback to bypass upstream overrides
-  if (!hasTools && ccMessages.length > 0) {
+  if (ccMessages.length > 0) {
     for (let i = ccMessages.length - 1; i >= 0; i--) {
       if (ccMessages[i].role === "user") {
         const msg = ccMessages[i];
