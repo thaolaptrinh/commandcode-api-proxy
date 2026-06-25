@@ -1,0 +1,15 @@
+services:
+  commandcode-api-proxy:
+    build: .
+    image: commandcode-api-proxy:latest
+    container_name: commandcode-api-proxy
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8787
+      - CC_API_KEY=${CC_API_KEY:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ~/.commandcode:/home/node/.commandcode:ro

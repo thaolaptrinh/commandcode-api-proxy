@@ -1,0 +1,55 @@
+{
+  "name": "commandcode-api-proxy",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible API proxy for Command Code. Use your Command Code subscription from any OpenAI client.",
+  "keywords": [
+    "ai-proxy",
+    "claude-code",
+    "command-code",
+    "commandcode",
+    "llm",
+    "openai-proxy",
+    "opencode"
+  ],
+  "homepage": "https://github.com/thaolaptrinh/commandcode-api-proxy",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/thaolaptrinh/commandcode-api-proxy.git"
+  },
+  "bin": {
+    "commandcode-api-proxy": "./dist/proxy.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "type": "module",
+  "main": "./dist/proxy.js",
+  "scripts": {
+    "build": "tsc && tsc-alias",
+    "start": "node dist/proxy.js",
+    "dev": "tsx src/proxy.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "vp lint",
+    "fmt": "vp fmt",
+    "fmt:check": "vp fmt --check",
+    "check": "vp check",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsc-alias": "^1.8.17",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "vite-plus": "^0.2.1",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "packageManager": "pnpm@10.32.1"
+}
