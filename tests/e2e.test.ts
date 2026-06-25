@@ -36,7 +36,7 @@ vi.mock("@/upstream.js", () => ({
 }));
 
 const MOCK_CC_EVENTS: CCEvent[] = [
-  { type: "start", data: { model: "deepseek/deepseek-v4-pro" } },
+  { type: "start", data: { model: "deepseek/deepseek-v4-flash" } },
   { type: "text-delta", data: { text: "Hello world" } },
   {
     type: "finish",
@@ -83,7 +83,7 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
         Authorization: "Bearer test-key",
       },
       body: JSON.stringify({
-        model: "deepseek/deepseek-v4-pro",
+        model: "deepseek/deepseek-v4-flash",
         messages: [{ role: "user", content: "Hi" }],
         stream: false,
       }),
@@ -112,7 +112,7 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
         Authorization: "Bearer test-key",
       },
       body: JSON.stringify({
-        model: "deepseek/deepseek-v4-pro",
+        model: "deepseek/deepseek-v4-flash",
         messages: [{ role: "user", content: "Hi" }],
         stream: true,
       }),

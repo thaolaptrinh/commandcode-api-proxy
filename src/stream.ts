@@ -26,14 +26,15 @@ export function parseCCLine(line: string): ParsedChunk {
   try {
     const parsed = JSON.parse(dataStr);
 
-    // CC format: { type: "...", data: {...} }
+    // CC API format 1 (flat): { type: "text-delta", id: "txt-0", text: "4" }
+    // CC API format 2 (nested): { type: "text-delta", data: { text: "Hello" } }
+    // Merge all non-type fields into data.
     if (parsed && typeof parsed === "object" && parsed.type) {
+      const { type, id: _id, ...rest } = parsed;
+      const data = parsed.data && typeof parsed.data === "object" ? parsed.data : rest;
       return {
         type: "event",
-        event: {
-          type: parsed.type,
-          data: parsed.data ?? {},
-        },
+        event: { type, data },
       };
     }
 
