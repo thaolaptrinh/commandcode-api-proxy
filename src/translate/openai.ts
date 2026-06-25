@@ -123,6 +123,7 @@ export function toCCRequest(
 ): CCRequestBody {
   const { ccMessages, systemPrompt } = toCCMessages(req.messages);
   const resolvedModel = resolveModel(req.model);
+  const hasTools = req.tools && req.tools.length > 0;
 
   const body: CCRequestBody = {
     config: buildCCConfig(configOverrides),
@@ -145,8 +146,16 @@ export function toCCRequest(
     threadId: crypto.randomUUID(),
   };
 
-  if (systemPrompt) {
-    body.params.system = systemPrompt;
+  const noToolsInstruction =
+    "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text.";
+  const finalSystemPrompt = hasTools
+    ? systemPrompt
+    : systemPrompt
+      ? `${systemPrompt}\n\n${noToolsInstruction}`
+      : noToolsInstruction;
+
+  if (finalSystemPrompt) {
+    body.params.system = finalSystemPrompt;
   }
 
   return body;

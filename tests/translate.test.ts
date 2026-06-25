@@ -59,7 +59,7 @@ describe("toCCRequest", () => {
     const cc = toCCRequest(req);
 
     expect(cc.params.model).toBe("deepseek/deepseek-v4-pro");
-    expect(cc.params.system).toBe("You are a helpful assistant.");
+    expect(cc.params.system).toContain("You are a helpful assistant.");
     expect(cc.params.messages).toHaveLength(1);
     expect(cc.params.messages[0]).toEqual({ role: "user", content: "Hello" });
     expect(cc.threadId).toBeDefined();
@@ -76,7 +76,7 @@ describe("toCCRequest", () => {
     };
 
     const cc = toCCRequest(req);
-    expect(cc.params.system).toBe("Dev instructions");
+    expect(cc.params.system).toContain("Dev instructions");
   });
 
   it("converts tool messages", () => {
@@ -339,7 +339,7 @@ describe("fromAnthropicToCC", () => {
     });
 
     expect(cc.params.model).toBe("deepseek/deepseek-v4-pro");
-    expect(cc.params.system).toBe("You are helpful.");
+    expect(cc.params.system).toContain("You are helpful.");
     expect(cc.params.messages).toHaveLength(1);
   });
 

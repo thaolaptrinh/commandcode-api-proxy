@@ -78,6 +78,15 @@ export function fromAnthropicToCC(req: AnthropicMessageRequest): CCRequestBody {
     // 'auto' maps to undefined
   }
 
+  const hasTools = req.tools && req.tools.length > 0;
+  const noToolsInstruction =
+    "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text.";
+  const finalSystemPrompt = hasTools
+    ? req.system
+    : req.system
+      ? `${req.system}\n\n${noToolsInstruction}`
+      : noToolsInstruction;
+
   const body: CCRequestBody = {
     config: buildCCConfig(),
     memory: "",
@@ -100,7 +109,9 @@ export function fromAnthropicToCC(req: AnthropicMessageRequest): CCRequestBody {
     threadId: crypto.randomUUID(),
   };
 
-  if (req.system) body.params.system = req.system;
+  if (finalSystemPrompt) {
+    body.params.system = finalSystemPrompt;
+  }
 
   return body;
 }
