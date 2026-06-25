@@ -8,22 +8,13 @@ import {
   toOpenAIErrorChunk,
   buildNonStreamingResponse,
 } from "@/translate/openai.js";
-import {
-  fromAnthropicToCC,
-  toAnthropicSSE,
-  buildAnthropicResponse,
-} from "@/translate/anthropic.js";
 import { getDefaultModels, fetchModelList } from "@/translate/models.js";
 import { resetMessageId } from "@/translate/util.js";
 import type { CCEvent } from "@/translate/types.js";
 import { formatSSE, formatSSEDone } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
 import { logger } from "@/logger.js";
-import {
-  validateOpenAIChatRequest,
-  validateAnthropicMessageRequest,
-  ValidationError,
-} from "@/translate/validation.js";
+import { validateOpenAIChatRequest, ValidationError } from "@/translate/validation.js";
 
 // ──────────────────────────────────────────
 // Mutable server state
@@ -175,6 +166,16 @@ async function handleChatCompletions(
   const isStream = openAIReq.stream === true;
   const model = openAIReq.model ?? "default";
 
+  logger.info(`[Incoming Request] Model: ${model}`);
+  logger.info(`[Incoming Request] Tools count: ${openAIReq.tools ? openAIReq.tools.length : 0}`);
+  if (openAIReq.tools && openAIReq.tools.length > 0) {
+    logger.info(
+      `[Incoming Request] Tools list: ${openAIReq.tools.map((t) => t.function.name).join(", ")}`,
+    );
+  } else {
+    logger.info(`[Incoming Request] No tools were sent by the client!`);
+  }
+
   resetMessageId();
   const ccBody = toCCRequest(openAIReq);
 
@@ -201,7 +202,7 @@ async function handleChatCompletions(
       });
 
       stream.on("data", (event: CCEvent) => {
-        for (const chunk of toOpenAIStreamChunk(event)) {
+        for (const chunk of toOpenAIStreamChunk(event, model)) {
           res.write(formatSSE(chunk));
         }
       });
@@ -221,85 +222,6 @@ async function handleChatCompletions(
     } else {
       const events = await collectEvents(stream);
       const response = buildNonStreamingResponse(events, model);
-      sendJson(res, 200, response);
-    }
-  } catch (err) {
-    handleUpstreamError(res, err);
-  }
-}
-
-async function handleMessages(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  let rawBody: unknown;
-  try {
-    rawBody = await parseBody(req);
-  } catch {
-    return sendJson(res, 400, { error: "Invalid JSON body" });
-  }
-
-  let anthropicReq;
-  try {
-    anthropicReq = validateAnthropicMessageRequest(rawBody);
-  } catch (err) {
-    if (err instanceof ValidationError) {
-      return sendJson(res, 400, { error: err.message });
-    }
-    return sendJson(res, 400, { error: "Invalid request body" });
-  }
-
-  const apiKey = extractApiKey(req);
-  if (!apiKey) {
-    return sendJson(res, 401, { error: "Unauthorized" });
-  }
-
-  const isStream = anthropicReq.stream === true;
-  const model = anthropicReq.model ?? "default";
-
-  resetMessageId();
-  const ccBody = fromAnthropicToCC(anthropicReq);
-
-  const abort = abortOnClientDisconnect(req, res);
-
-  try {
-    const result = await sendToCC(
-      ccBody,
-      {
-        apiBase: config.ccApiBase,
-        apiKey,
-        ccVersion: config.ccVersion,
-      },
-      abort.signal,
-    );
-    const stream = result.stream;
-
-    if (isStream) {
-      res.writeHead(200, {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-        ...corsHeaders(),
-      });
-
-      const flushAnthropic = (event: CCEvent) => {
-        for (const sse of toAnthropicSSE(event)) {
-          res.write(`event: ${sse.event}\n`);
-          res.write(formatSSE(sse.data));
-        }
-      };
-
-      stream.on("data", flushAnthropic);
-      stream.on("end", () => res.end());
-      stream.on("error", (err: Error) => {
-        logger.error("[anthropic-stream] Anthropic streaming error:", err.message);
-        if (!res.destroyed) {
-          res.write(`event: error\n`);
-          res.write(formatSSE({ type: "error", error: { message: err.message } }));
-          res.end();
-        }
-      });
-      destroyStreamOnClientDisconnect(req, stream);
-    } else {
-      const events = await collectEvents(stream);
-      const response = buildAnthropicResponse(events, model);
       sendJson(res, 200, response);
     }
   } catch (err) {
@@ -352,7 +274,6 @@ export function createServer(cfg: Config): http.Server {
     { method: "GET", path: "/health", handler: handleHealth },
     { method: "GET", path: "/v1/models", handler: handleModels },
     { method: "POST", path: "/v1/chat/completions", handler: handleChatCompletions },
-    { method: "POST", path: "/v1/messages", handler: handleMessages },
   ];
 
   const server = http.createServer((req, res) => {

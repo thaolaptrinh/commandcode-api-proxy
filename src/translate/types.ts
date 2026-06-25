@@ -1,4 +1,4 @@
-// Shared types for the OpenAI / Anthropic ↔ Command Code translation layer.
+// Shared types for the OpenAI ↔ Command Code translation layer.
 
 // ──────────────────────────────────────────
 // OpenAI request types
@@ -57,7 +57,7 @@ export interface ToolCall {
 // ──────────────────────────────────────────
 
 export interface CCMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "tool";
   content: string | CCContentPart[];
 }
 
@@ -66,9 +66,13 @@ export interface CCContentPart {
   text?: string;
   image?: string;
   toolCallId?: string;
+  toolName?: string;
   name?: string;
   arguments?: string;
+  args?: unknown;
+  input?: unknown;
   result?: string;
+  output?: unknown;
   isError?: boolean;
 }
 
@@ -116,50 +120,13 @@ export interface CCEvent {
 }
 
 // ──────────────────────────────────────────
-// Anthropic request types
-// ──────────────────────────────────────────
-
-export interface AnthropicMessageRequest {
-  model: string;
-  max_tokens: number;
-  system?: string;
-  messages: { role: "user" | "assistant"; content: string | AnthropicContentBlock[] }[];
-  stream?: boolean;
-  tools?: AnthropicTool[];
-  tool_choice?: { type: "auto" | "any" | "tool"; name?: string };
-  thinking?: { budget_tokens: number };
-}
-
-export interface AnthropicContentBlock {
-  type: "text" | "tool_use" | "tool_result" | "image";
-  text?: string;
-  id?: string;
-  name?: string;
-  input?: Record<string, unknown>;
-  content?: string;
-  source?: { type: "base64"; media_type: string; data: string };
-  tool_use_id?: string;
-  is_error?: boolean;
-}
-
-export interface AnthropicTool {
-  name: string;
-  description?: string;
-  input_schema: Record<string, unknown>;
-}
-
-// ──────────────────────────────────────────
 // Shared output types
 // ──────────────────────────────────────────
-
-export interface AnthropicSSEEvent {
-  event: string;
-  data: Record<string, unknown>;
-}
 
 export interface UsageData {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
   promptTokensDetails?: { cachedTokens?: number };
+  completionTokensDetails?: { reasoningTokens?: number };
 }

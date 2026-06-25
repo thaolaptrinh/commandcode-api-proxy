@@ -15,6 +15,7 @@ import type {
 } from "@/translate/types.js";
 import { resolveModel } from "@/translate/models.js";
 import { getMessageId, extractUsage, pruneDanglingTools, buildCCConfig } from "@/translate/util.js";
+import { logger } from "@/logger.js";
 
 // ──────────────────────────────────────────
 // OpenAI request → CC request
@@ -26,6 +27,17 @@ function toCCMessages(messages: OpenAIMessage[]): {
 } {
   const systemParts: string[] = [];
   const ccMessages: CCMessage[] = [];
+
+  // Map tool_call_id -> toolName so tool-result parts can carry the tool name
+  // required by the CC upstream schema (tool-result parts need a `toolName`).
+  const toolNameById = new Map<string, string>();
+  for (const msg of messages) {
+    if (msg.tool_calls) {
+      for (const tc of msg.tool_calls) {
+        if (tc.id) toolNameById.set(tc.id, tc.function.name);
+      }
+    }
+  }
 
   for (const msg of messages) {
     if (msg.role === "system" || msg.role === "developer") {
@@ -41,13 +53,16 @@ function toCCMessages(messages: OpenAIMessage[]): {
     }
 
     if (msg.role === "tool") {
+      const resultText =
+        typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content);
       ccMessages.push({
-        role: "user",
+        role: "tool",
         content: [
           {
             type: "tool-result",
             toolCallId: msg.tool_call_id ?? "",
-            result: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
+            toolName: (msg.tool_call_id ? toolNameById.get(msg.tool_call_id) : undefined) ?? "",
+            output: { type: "text", value: resultText },
           },
         ],
       });
@@ -60,11 +75,17 @@ function toCCMessages(messages: OpenAIMessage[]): {
         parts.push({ type: "text", text: msg.content });
       }
       for (const tc of msg.tool_calls) {
+        let parsedInput: unknown;
+        try {
+          parsedInput = tc.function.arguments ? JSON.parse(tc.function.arguments) : {};
+        } catch {
+          parsedInput = tc.function.arguments;
+        }
         parts.push({
           type: "tool-call",
           toolCallId: tc.id,
-          name: tc.function.name,
-          arguments: tc.function.arguments,
+          toolName: tc.function.name,
+          input: parsedInput,
         });
       }
       ccMessages.push({ role: "assistant", content: parts });
@@ -145,18 +166,23 @@ export function toCCRequest(
     threadId: crypto.randomUUID(),
   };
 
+  const hasTools = req.tools && req.tools.length > 0;
   const noToolsInstruction =
     "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text.";
+  const withToolsInstruction = "";
+
   const finalSystemPrompt = systemPrompt
-    ? `${systemPrompt}\n\n${noToolsInstruction}`
-    : noToolsInstruction;
+    ? `${systemPrompt}\n\n${hasTools ? withToolsInstruction : noToolsInstruction}`
+    : hasTools
+      ? withToolsInstruction
+      : noToolsInstruction;
 
   if (finalSystemPrompt) {
     body.params.system = finalSystemPrompt;
   }
 
   // Also append directly to the last user message as a fallback to bypass upstream overrides
-  if (ccMessages.length > 0) {
+  if (ccMessages.length > 0 && !hasTools) {
     for (let i = ccMessages.length - 1; i >= 0; i--) {
       if (ccMessages[i].role === "user") {
         const msg = ccMessages[i];
@@ -184,18 +210,52 @@ export function toCCRequest(
 // CC events → OpenAI streaming chunks
 // ──────────────────────────────────────────
 
-export function toOpenAIStreamChunk(event: CCEvent): object[] {
+/**
+ * Convert internal UsageData into the OpenAI `usage` object format
+ * (prompt_tokens / completion_tokens / total_tokens + detail sub-objects).
+ */
+function toOpenAIUsage(u: UsageData): Record<string, unknown> {
+  const promptTokens = u.promptTokens ?? 0;
+  const completionTokens = u.completionTokens ?? 0;
+  const usage: Record<string, unknown> = {
+    prompt_tokens: promptTokens,
+    completion_tokens: completionTokens,
+    total_tokens: u.totalTokens ?? promptTokens + completionTokens,
+  };
+  if (u.promptTokensDetails?.cachedTokens != null) {
+    usage.prompt_tokens_details = { cached_tokens: u.promptTokensDetails.cachedTokens };
+  }
+  if (u.completionTokensDetails?.reasoningTokens != null) {
+    usage.completion_tokens_details = {
+      reasoning_tokens: u.completionTokensDetails.reasoningTokens,
+    };
+  }
+  return usage;
+}
+
+// Index counter for tool calls within a single streaming response.
+let toolCallIndex = 0;
+
+/**
+ * Translate a single CC event into OpenAI streaming chunks.
+ *
+ * `model` is the model id requested by the downstream client (echoed back in
+ * every chunk per the OpenAI spec). `responseModel` is the model reported by
+ * the upstream `start` event, if any — used only to enrich the first chunk.
+ */
+export function toOpenAIStreamChunk(event: CCEvent, model = "unknown"): object[] {
   const chunks: object[] = [];
   const id = getMessageId();
   const created = Math.floor(Date.now() / 1000);
 
   switch (event.type) {
     case "start": {
+      toolCallIndex = 0;
       chunks.push({
         id,
         object: "chat.completion.chunk",
         created,
-        model: (event.data.model as string) ?? "unknown",
+        model,
         choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
       });
       break;
@@ -208,7 +268,7 @@ export function toOpenAIStreamChunk(event: CCEvent): object[] {
           id,
           object: "chat.completion.chunk",
           created,
-          model: "unknown",
+          model,
           choices: [{ index: 0, delta: { content: text }, finish_reason: null }],
         });
       }
@@ -222,7 +282,7 @@ export function toOpenAIStreamChunk(event: CCEvent): object[] {
           id,
           object: "chat.completion.chunk",
           created,
-          model: "unknown",
+          model,
           choices: [{ index: 0, delta: { reasoning_content: text }, finish_reason: null }],
         });
       }
@@ -230,23 +290,58 @@ export function toOpenAIStreamChunk(event: CCEvent): object[] {
     }
 
     case "tool-call-delta": {
+      const tc: Record<string, any> = {
+        index: (event.data.index as number) ?? 0,
+        function: { arguments: (event.data.arguments as string) ?? "" },
+      };
+      if (event.data.toolCallId) {
+        tc.id = event.data.toolCallId;
+        tc.type = "function";
+      }
+      if (event.data.name) {
+        tc.function.name = event.data.name;
+      }
+
       chunks.push({
         id,
         object: "chat.completion.chunk",
         created,
-        model: "unknown",
+        model,
+        choices: [
+          {
+            index: 0,
+            delta: {
+              tool_calls: [tc],
+            },
+            finish_reason: null,
+          },
+        ],
+      });
+      break;
+    }
+
+    case "tool-call": {
+      // CC complete tool-call event: { toolCallId, toolName, input (object) }
+      // Translate to OpenAI tool_calls delta (arguments must be a JSON string).
+      const toolCallId = (event.data.toolCallId as string) ?? "";
+      const toolName = (event.data.toolName as string) ?? (event.data.name as string) ?? "";
+      const input = event.data.input ?? event.data.arguments;
+      const args = typeof input === "string" ? input : input != null ? JSON.stringify(input) : "";
+      chunks.push({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model,
         choices: [
           {
             index: 0,
             delta: {
               tool_calls: [
                 {
-                  index: (event.data.index as number) ?? 0,
-                  id: event.data.toolCallId as string,
-                  function: {
-                    name: event.data.name as string,
-                    arguments: event.data.arguments as string,
-                  },
+                  index: toolCallIndex++,
+                  id: toolCallId,
+                  type: "function",
+                  function: { name: toolName, arguments: args },
                 },
               ],
             },
@@ -264,6 +359,8 @@ export function toOpenAIStreamChunk(event: CCEvent): object[] {
         stop: "stop",
         length: "length",
         content_filtered: "content_filter",
+        "tool-call": "tool_calls",
+        "tool-calls": "tool_calls",
         tool_call: "tool_calls",
         error: "stop",
       };
@@ -271,16 +368,52 @@ export function toOpenAIStreamChunk(event: CCEvent): object[] {
         id,
         object: "chat.completion.chunk",
         created,
-        model: "unknown",
+        model,
         choices: [{ index: 0, delta: {}, finish_reason: finishMap[finishReason] ?? "stop" }],
-        ...(usage ? { usage } : {}),
       });
+      // OpenAI streams usage as a separate trailing chunk with an empty
+      // `choices` array. We emit it whenever the upstream reports usage so
+      // clients that rely on it (context-window %, billing, etc.) receive it.
+      if (usage) {
+        chunks.push({
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model,
+          choices: [],
+          usage: toOpenAIUsage(usage),
+        });
+      }
       break;
     }
 
-    case "error":
-      // Handled at the stream level, not emitted as a chunk.
+    case "error": {
+      // Surface upstream errors instead of silently dropping them, so the
+      // downstream client sees what went wrong (an empty stream is harder to
+      // debug). Emit the message as content, then a stop finish.
+      const errMsg =
+        (event.data.message as string) ??
+        (event.data.error as { message?: string } | undefined)?.message ??
+        JSON.stringify(event.data);
+      logger.error(`[CC upstream error] ${errMsg}`);
+      chunks.push({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model,
+        choices: [
+          { index: 0, delta: { content: `[upstream error] ${errMsg}` }, finish_reason: null },
+        ],
+      });
+      chunks.push({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model,
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      });
       break;
+    }
   }
 
   return chunks;
@@ -308,6 +441,8 @@ const OPENAI_FINISH_MAP: Record<string, string> = {
   stop: "stop",
   length: "length",
   content_filtered: "content_filter",
+  "tool-call": "tool_calls",
+  "tool-calls": "tool_calls",
   tool_call: "tool_calls",
   error: "stop",
 };
@@ -342,16 +477,19 @@ export function buildNonStreamingResponse(events: CCEvent[], model: string): obj
         }
         break;
       }
-      case "tool-call":
+      case "tool-call": {
+        const input = event.data.input ?? event.data.arguments;
         toolCalls.push({
           id: (event.data.toolCallId as string) ?? "",
           type: "function",
           function: {
-            name: (event.data.name as string) ?? "",
-            arguments: (event.data.arguments as string) ?? "",
+            name: (event.data.toolName as string) ?? (event.data.name as string) ?? "",
+            arguments:
+              typeof input === "string" ? input : input != null ? JSON.stringify(input) : "",
           },
         });
         break;
+      }
       case "finish":
         finish = {
           finishReason: event.data.finishReason as string,
@@ -386,7 +524,7 @@ export function buildNonStreamingResponse(events: CCEvent[], model: string): obj
     ],
   };
 
-  if (finish?.usage) response.usage = finish.usage;
+  if (finish?.usage) response.usage = toOpenAIUsage(finish.usage);
 
   return response;
 }

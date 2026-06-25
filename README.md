@@ -1,7 +1,7 @@
 # Command Code API Proxy
 
 **OpenAI-compatible API proxy for [Command Code](https://commandcode.ai).**
-Use your Command Code subscription from **any** OpenAI-compatible client — OpenCode, Claude Code, Continue, the OpenAI SDK, or plain `curl`.
+Use your Command Code subscription from **any** OpenAI-compatible client — OpenCode, Continue, the OpenAI SDK, or plain `curl`.
 
 ```
 npx commandcode-api-proxy
@@ -62,19 +62,6 @@ curl http://127.0.0.1:8787/v1/chat/completions \
   }'
 ```
 
-### `POST /v1/messages` (Anthropic)
-
-```bash
-curl http://127.0.0.1:8787/v1/messages \
-  -H "x-api-key: user_xxx" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-sonnet-4-6",
-    "max_tokens": 1000,
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
 ## Client configuration
 
 ### OpenCode
@@ -115,14 +102,6 @@ Add to your `opencode.json` (project root or `~/.config/opencode/opencode.json`)
     }
   }
 }
-```
-
-### Claude Code
-
-```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-export ANTHROPIC_API_KEY=placeholder
-claude
 ```
 
 ### OpenAI Python SDK

@@ -97,8 +97,8 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     expect(body.choices[0].message.role).toBe("assistant");
     expect(body.choices[0].finish_reason).toBe("stop");
     expect(body.usage).toBeDefined();
-    expect(body.usage.promptTokens).toBe(5);
-    expect(body.usage.completionTokens).toBe(10);
+    expect(body.usage.prompt_tokens).toBe(5);
+    expect(body.usage.completion_tokens).toBe(10);
     expect(sendToCCSpy).toHaveBeenCalledOnce();
   });
 
@@ -125,13 +125,16 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     const lines = text.split("\n").filter((l) => l.startsWith("data: ") && !l.includes("[DONE]"));
     expect(lines.length).toBeGreaterThan(0);
 
-    const firstChunk = JSON.parse(lines[0].replace("data: ", ""));
+    const parsed = lines.map((l) => JSON.parse(l.replace("data: ", "")));
+
+    const firstChunk = parsed[0];
     expect(firstChunk.object).toBe("chat.completion.chunk");
     expect(firstChunk.choices[0].delta.role).toBe("assistant");
 
-    const lastDataLine = lines[lines.length - 1];
-    const lastChunk = JSON.parse(lastDataLine.replace("data: ", ""));
-    expect(lastChunk.choices[0].finish_reason).toBe("stop");
+    // The finish chunk carries finish_reason (a trailing usage chunk has empty choices).
+    const finishChunk = parsed.find((c) => c.choices?.[0]?.finish_reason);
+    expect(finishChunk).toBeDefined();
+    expect(finishChunk.choices[0].finish_reason).toBe("stop");
   });
 
   it("returns 400 for invalid JSON body", async () => {
@@ -174,98 +177,6 @@ describe("E2E: Auth", () => {
       body: JSON.stringify({ model: "default", messages: [{ role: "user", content: "Hi" }] }),
     });
     expect(res.status).toBe(401);
-  });
-
-  it("returns 401 for /v1/messages without API key", async () => {
-    const res = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "default",
-        max_tokens: 100,
-        messages: [{ role: "user", content: "Hi" }],
-      }),
-    });
-    expect(res.status).toBe(401);
-  });
-});
-
-// ──────────────────────────────────────────
-// E2E: Anthropic /v1/messages
-// ──────────────────────────────────────────
-
-describe("E2E: Anthropic /v1/messages", () => {
-  let server: http.Server;
-  let baseUrl: string;
-  const port = 19002;
-
-  beforeAll(async () => {
-    const config = { ...loadConfig(), port, apiKey: "test-key", host: "127.0.0.1" };
-    server = createServer(config);
-    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
-    baseUrl = `http://127.0.0.1:${port}`;
-  });
-
-  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
-
-  afterEach(() => {
-    sendToCCSpy.mockReset();
-  });
-
-  it("non-streaming: returns Anthropic message format", async () => {
-    sendToCCSpy.mockResolvedValue({ stream: fakeStream() });
-
-    const res = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": "test-key",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: "Tell me a joke" }],
-        stream: false,
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    expect(body.type).toBe("message");
-    expect(body.role).toBe("assistant");
-    expect(body.content).toHaveLength(1);
-    expect(body.content[0].type).toBe("text");
-    expect(body.content[0].text).toBe("Hello world");
-    expect(body.stop_reason).toBe("end_turn");
-    expect(body.usage).toBeDefined();
-  });
-
-  it("streaming: returns Anthropic SSE events", async () => {
-    sendToCCSpy.mockResolvedValue({ stream: fakeStream() });
-
-    const res = await fetch(`${baseUrl}/v1/messages`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": "test-key",
-      },
-      body: JSON.stringify({
-        model: "claude-sonnet-4-6",
-        max_tokens: 1000,
-        messages: [{ role: "user", content: "Tell me a joke" }],
-        stream: true,
-      }),
-    });
-
-    expect(res.status).toBe(200);
-    expect(res.headers.get("content-type")).toContain("text/event-stream");
-
-    const text = await res.text();
-    const eventLines = text.split("\n").filter((l) => l.startsWith("event: "));
-    expect(eventLines.length).toBeGreaterThan(0);
-    expect(eventLines.some((l) => l.includes("message_start"))).toBe(true);
-    expect(eventLines.some((l) => l.includes("content_block_delta"))).toBe(true);
-    expect(eventLines.some((l) => l.includes("message_stop"))).toBe(true);
   });
 });
 

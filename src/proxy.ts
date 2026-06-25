@@ -41,7 +41,6 @@ server.listen(config.port, config.host, () => {
   console.log("    GET  /health");
   console.log("    GET  /v1/models");
   console.log("    POST /v1/chat/completions  (OpenAI format)");
-  console.log("    POST /v1/messages          (Anthropic format)");
   console.log("");
   console.log("  Press Ctrl+C to stop\n");
 });

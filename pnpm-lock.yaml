@@ -11,6 +11,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.2
+      ai:
+        specifier: ^5.0.206
+        version: 5.0.206(zod@4.4.3)
       tsc-alias:
         specifier: ^1.8.17
         version: 1.8.17
@@ -22,12 +25,28 @@ importers:
         version: 5.9.3
       vite-plus:
         specifier: ^0.2.1
-        version: 0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
+        version: 0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
       vitest:
         specifier: ^3.0.0
         version: 3.2.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)
 
 packages:
+
+  '@ai-sdk/gateway@2.0.105':
+    resolution: {integrity: sha512-X0cdnJ/B422AvtKf5C2ZO8cyVf36utX8DORg6AHux1+a3EGYSLIy91L6MrUKOP68c7dL3WnAirOaiQrGL8rueQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider-utils@3.0.27':
+    resolution: {integrity: sha512-JFhJK5ynprll2FR3e+sHagJJIwvIagsNA0FLbLPq2Os4yLUK2/eiaCU0jXsADik73/hhvcPPLmD+Uo8eu5kFaQ==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@2.0.3':
+    resolution: {integrity: sha512-h88OPkavHTiN9tMn2l5awAznGB0lXzjcLhgR1/rvjB2zlLprsNxbM2tt6OJsHUxduLC3klq0/eqaSf6fX5XVww==}
+    engines: {node: '>=18'}
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -214,6 +233,10 @@ packages:
   '@nodelib/fs.walk@1.2.8':
     resolution: {integrity: sha512-oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==}
     engines: {node: '>= 8'}
+
+  '@opentelemetry/api@1.9.0':
+    resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
+    engines: {node: '>=8.0.0'}
 
   '@oxc-project/runtime@0.136.0':
     resolution: {integrity: sha512-u0EutjK5y6NHJkl5jNJCs8zbup1z6A/UEWgajrYzqcEU3UX05HjqybhMQOLhSM0eKGISyM6WfSMMuklYSmH2wA==}
@@ -669,6 +692,10 @@ packages:
   '@types/node@24.13.2':
     resolution: {integrity: sha512-fRa09kZTgu8o71KFcDjUFuc7F+dEbZYZmkI0mg5YBTRs0yMKjYHsq/c0urDKeDb+D5qVgXOdFcuu+DZPKOITwA==}
 
+  '@vercel/oidc@3.1.0':
+    resolution: {integrity: sha512-Fw28YZpRnA3cAHHDlkt7xQHiJ0fcL+NRcIqsocZQUSmbzeIKRpwttJjik5ZGanXP+vlA4SbTg+AbA3bP363l+w==}
+    engines: {node: '>= 20'}
+
   '@vitest/browser-preview@4.1.9':
     resolution: {integrity: sha512-a4/OrkMDb/WUnE4OOB/4FJbK3rYVO7YykqtUgcTKG4p2a0R3XcjPVu7SLRHFBs2+NIYhv5yxp1Lz3dbdGBjIow==}
     peerDependencies:
@@ -852,6 +879,12 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  ai@5.0.206:
+    resolution: {integrity: sha512-LQ+Jh0VAXbLhpiLlkAs4WcBUFzh59B5WVb+YgAya15mMUuXeDdeozw2UduM6tKQ+i6uNaSqtV/bJkiG8Ogp6lA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   ansi-regex@5.0.1:
     resolution: {integrity: sha512-quJQXlTSUGL2LH9SUXo8VwsY4soanhgo6LNSm84E1LBcE8s3O0wpdiRzyR9z/ZZJMlMWv37qOOb9pdJlMUEKFQ==}
     engines: {node: '>=8'}
@@ -952,6 +985,10 @@ packages:
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
 
+  eventsource-parser@3.1.0:
+    resolution: {integrity: sha512-kJezFj9YFAMLeORyi7aCLxLbD5/qWMQnoMVlVPyHIll7lgRJCc3JVln9Vgl9nwQi0YkMnhdGTMNn7CkRRAptMg==}
+    engines: {node: '>=18.0.0'}
+
   expect-type@1.3.0:
     resolution: {integrity: sha512-knvyeauYhqjOYvQ66MznSMs83wmHrCycNEN6Ao+2AeYEfxUIkuiVxdEa1qlGEPK+We3n0THiDciYSsCcgW/DoA==}
     engines: {node: '>=12.0.0'}
@@ -1017,6 +1054,9 @@ packages:
 
   js-tokens@9.0.1:
     resolution: {integrity: sha512-mxa9E9ITFOt0ban3j6L5MpjwegGz6lBQmM1IJkWeBZGcMxto50+eWdjC/52xDbS2vy0k7vIMK0Fe2wfL9OQSpQ==}
+
+  json-schema@0.4.0:
+    resolution: {integrity: sha512-es94M3nTIfsEPisRafak+HDLfHXnKBhV3vU5eqPcS3flIWqcxJWgXHXiey3YrpaNsanY5ei1VoYEbOzijuq9BA==}
 
   lightningcss-android-arm64@1.32.0:
     resolution: {integrity: sha512-YK7/ClTt4kAK0vo6w3X+Pnm0D2cf2vPHbhOXdoNti1Ga0al1P4TBZhwjATvjNwLEBCnKvjJc2jQgHXH0NEwlAg==}
@@ -1462,7 +1502,28 @@ packages:
       utf-8-validate:
         optional: true
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
+
+  '@ai-sdk/gateway@2.0.105(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 2.0.3
+      '@ai-sdk/provider-utils': 3.0.27(zod@4.4.3)
+      '@vercel/oidc': 3.1.0
+      zod: 4.4.3
+
+  '@ai-sdk/provider-utils@3.0.27(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 2.0.3
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.1.0
+      zod: 4.4.3
+
+  '@ai-sdk/provider@2.0.3':
+    dependencies:
+      json-schema: 0.4.0
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -1567,6 +1628,8 @@ snapshots:
     dependencies:
       '@nodelib/fs.scandir': 2.1.5
       fastq: 1.20.1
+
+  '@opentelemetry/api@1.9.0': {}
 
   '@oxc-project/runtime@0.136.0': {}
 
@@ -1815,6 +1878,8 @@ snapshots:
     dependencies:
       undici-types: 7.18.2
 
+  '@vercel/oidc@3.1.0': {}
+
   '@vitest/browser-preview@4.1.9(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))(vitest@3.2.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))':
     dependencies:
       '@testing-library/dom': 10.4.1
@@ -1853,7 +1918,7 @@ snapshots:
       pngjs: 7.0.0
       sirv: 3.0.2
       tinyrainbow: 3.1.0
-      vitest: 4.1.9(@types/node@24.13.2)(@vitest/browser-preview@4.1.9)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
+      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/browser-preview@4.1.9)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
       ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
@@ -1981,6 +2046,14 @@ snapshots:
   '@voidzero-dev/vite-plus-win32-x64-msvc@0.2.1':
     optional: true
 
+  ai@5.0.206(zod@4.4.3):
+    dependencies:
+      '@ai-sdk/gateway': 2.0.105(zod@4.4.3)
+      '@ai-sdk/provider': 2.0.3
+      '@ai-sdk/provider-utils': 3.0.27(zod@4.4.3)
+      '@opentelemetry/api': 1.9.0
+      zod: 4.4.3
+
   ansi-regex@5.0.1: {}
 
   ansi-styles@5.2.0: {}
@@ -2087,6 +2160,8 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
 
+  eventsource-parser@3.1.0: {}
+
   expect-type@1.3.0: {}
 
   fast-glob@3.3.3:
@@ -2146,6 +2221,8 @@ snapshots:
   js-tokens@4.0.0: {}
 
   js-tokens@9.0.1: {}
+
+  json-schema@0.4.0: {}
 
   lightningcss-android-arm64@1.32.0:
     optional: true
@@ -2223,7 +2300,7 @@ snapshots:
 
   obug@2.1.3: {}
 
-  oxfmt@0.55.0(vite-plus@0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))):
+  oxfmt@0.55.0(vite-plus@0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))):
     dependencies:
       tinypool: 2.1.0
     optionalDependencies:
@@ -2246,7 +2323,7 @@ snapshots:
       '@oxfmt/binding-win32-arm64-msvc': 0.55.0
       '@oxfmt/binding-win32-ia32-msvc': 0.55.0
       '@oxfmt/binding-win32-x64-msvc': 0.55.0
-      vite-plus: 0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
+      vite-plus: 0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
 
   oxlint-tsgolint@0.23.0:
     optionalDependencies:
@@ -2257,7 +2334,7 @@ snapshots:
       '@oxlint-tsgolint/win32-arm64': 0.23.0
       '@oxlint-tsgolint/win32-x64': 0.23.0
 
-  oxlint@1.70.0(oxlint-tsgolint@0.23.0)(vite-plus@0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))):
+  oxlint@1.70.0(oxlint-tsgolint@0.23.0)(vite-plus@0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))):
     optionalDependencies:
       '@oxlint/binding-android-arm-eabi': 1.70.0
       '@oxlint/binding-android-arm64': 1.70.0
@@ -2279,7 +2356,7 @@ snapshots:
       '@oxlint/binding-win32-ia32-msvc': 1.70.0
       '@oxlint/binding-win32-x64-msvc': 1.70.0
       oxlint-tsgolint: 0.23.0
-      vite-plus: 0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
+      vite-plus: 0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
 
   path-type@4.0.0: {}
 
@@ -2450,7 +2527,7 @@ snapshots:
       - tsx
       - yaml
 
-  vite-plus@0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)):
+  vite-plus@0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)):
     dependencies:
       '@oxc-project/types': 0.136.0
       '@oxlint/plugins': 1.68.0
@@ -2464,10 +2541,10 @@ snapshots:
       '@vitest/spy': 4.1.9
       '@vitest/utils': 4.1.9
       '@voidzero-dev/vite-plus-core': 0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)
-      oxfmt: 0.55.0(vite-plus@0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)))
-      oxlint: 1.70.0(oxlint-tsgolint@0.23.0)(vite-plus@0.2.1(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)))
+      oxfmt: 0.55.0(vite-plus@0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)))
+      oxlint: 1.70.0(oxlint-tsgolint@0.23.0)(vite-plus@0.2.1(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(esbuild@0.28.1)(tsx@4.22.4)(typescript@5.9.3)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)))
       oxlint-tsgolint: 0.23.0
-      vitest: 4.1.9(@types/node@24.13.2)(@vitest/browser-preview@4.1.9)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
+      vitest: 4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/browser-preview@4.1.9)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
     optionalDependencies:
       '@voidzero-dev/vite-plus-darwin-arm64': 0.2.1
       '@voidzero-dev/vite-plus-darwin-x64': 0.2.1
@@ -2565,7 +2642,7 @@ snapshots:
       - tsx
       - yaml
 
-  vitest@4.1.9(@types/node@24.13.2)(@vitest/browser-preview@4.1.9)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)):
+  vitest@4.1.9(@opentelemetry/api@1.9.0)(@types/node@24.13.2)(@vitest/browser-preview@4.1.9)(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)):
     dependencies:
       '@vitest/expect': 4.1.9
       '@vitest/mocker': 4.1.9(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
@@ -2588,6 +2665,7 @@ snapshots:
       vite: 7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4)
       why-is-node-running: 2.3.0
     optionalDependencies:
+      '@opentelemetry/api': 1.9.0
       '@types/node': 24.13.2
       '@vitest/browser-preview': 4.1.9(vite@7.3.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))(vitest@3.2.6(@types/node@24.13.2)(lightningcss@1.32.0)(tsx@4.22.4))
     transitivePeerDependencies:
@@ -2599,3 +2677,5 @@ snapshots:
       stackback: 0.0.2
 
   ws@8.21.0: {}
+
+  zod@4.4.3: {}

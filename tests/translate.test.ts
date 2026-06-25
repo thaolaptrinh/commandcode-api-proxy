@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { toCCRequest, buildNonStreamingResponse, toOpenAIStreamChunk } from "@/translate/openai.js";
-import { fromAnthropicToCC, toAnthropicSSE } from "@/translate/anthropic.js";
 import { resolveModel, getDefaultModels } from "@/translate/models.js";
 import { resetMessageId } from "@/translate/util.js";
 import type { OpenAIChatRequest, CCEvent } from "@/translate/types.js";
@@ -112,7 +111,7 @@ describe("toCCRequest", () => {
       const toolCallPart = assistantMsg.content.find((p: any) => p.type === "tool-call");
       expect(toolCallPart).toBeDefined();
       expect(toolCallPart?.toolCallId).toBe("call_123");
-      expect(toolCallPart?.name).toBe("get_weather");
+      expect(toolCallPart?.toolName).toBe("get_weather");
     }
 
     const toolResultMsg = cc.params.messages.find((m) => {
@@ -267,9 +266,13 @@ describe("toOpenAIStreamChunk", () => {
         usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       },
     });
-    expect(chunks).toHaveLength(1);
+    // finish chunk + separate OpenAI usage chunk (empty choices)
+    expect(chunks).toHaveLength(2);
     expect((chunks[0] as any).choices[0].finish_reason).toBe("stop");
-    expect((chunks[0] as any).usage.promptTokens).toBe(10);
+    expect((chunks[1] as any).choices).toEqual([]);
+    expect((chunks[1] as any).usage.prompt_tokens).toBe(10);
+    expect((chunks[1] as any).usage.completion_tokens).toBe(20);
+    expect((chunks[1] as any).usage.total_tokens).toBe(30);
   });
 
   it("maps finish reasons correctly", () => {
@@ -309,7 +312,7 @@ describe("buildNonStreamingResponse", () => {
     const resp = buildNonStreamingResponse(events, "deepseek/deepseek-v4-pro") as any;
     expect(resp.choices[0].message.content).toBe("Hello world");
     expect(resp.choices[0].finish_reason).toBe("stop");
-    expect(resp.usage.totalTokens).toBe(5);
+    expect(resp.usage.total_tokens).toBe(5);
   });
 
   it("includes reasoning content", () => {
@@ -323,78 +326,5 @@ describe("buildNonStreamingResponse", () => {
     const resp = buildNonStreamingResponse(events, "model") as any;
     expect(resp.choices[0].message.reasoning_content).toBe("thinking");
     expect(resp.choices[0].message.content).toBe("Answer");
-  });
-});
-
-// ──────────────────────────────────────────
-// Anthropic surface
-// ──────────────────────────────────────────
-
-describe("fromAnthropicToCC", () => {
-  it("converts Anthropic messages to CC format", () => {
-    const cc = fromAnthropicToCC({
-      model: "claude-sonnet-4-6",
-      max_tokens: 1000,
-      system: "You are helpful.",
-      messages: [{ role: "user", content: "Hello" }],
-    });
-
-    expect(cc.params.model).toBe("deepseek/deepseek-v4-pro");
-    expect(cc.params.system).toContain("You are helpful.");
-    expect(cc.params.messages).toHaveLength(1);
-  });
-
-  it("maps thinking budget to reasoning effort", () => {
-    const ccHigh = fromAnthropicToCC({
-      model: "default",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: "Hi" }],
-      thinking: { budget_tokens: 10000 },
-    });
-    expect(ccHigh.params.reasoning_effort).toBe("high");
-
-    const ccLow = fromAnthropicToCC({
-      model: "default",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: "Hi" }],
-      thinking: { budget_tokens: 2000 },
-    });
-    expect(ccLow.params.reasoning_effort).toBe("low");
-  });
-});
-
-describe("toAnthropicSSE", () => {
-  beforeEach(() => resetMessageId());
-
-  it("converts start event to message_start + content_block_start", () => {
-    const events = toAnthropicSSE({
-      type: "start",
-      data: { model: "deepseek/deepseek-v4-pro" },
-    });
-    expect(events).toHaveLength(2);
-    expect(events[0].event).toBe("message_start");
-    expect(events[1].event).toBe("content_block_start");
-  });
-
-  it("converts text-delta to content_block_delta", () => {
-    const events = toAnthropicSSE({
-      type: "text-delta",
-      data: { text: "Hello" },
-    });
-    expect(events).toHaveLength(1);
-    expect(events[0].event).toBe("content_block_delta");
-    expect((events[0].data as any).delta.type).toBe("text_delta");
-    expect((events[0].data as any).delta.text).toBe("Hello");
-  });
-
-  it("converts finish to content_block_stop + message_delta + message_stop", () => {
-    const events = toAnthropicSSE({
-      type: "finish",
-      data: { finishReason: "stop" },
-    });
-    expect(events).toHaveLength(3);
-    expect(events[0].event).toBe("content_block_stop");
-    expect(events[1].event).toBe("message_delta");
-    expect(events[2].event).toBe("message_stop");
   });
 });

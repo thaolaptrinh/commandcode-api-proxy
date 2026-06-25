@@ -5,7 +5,7 @@ import type { CCMessage, CCRequestBody, UsageData } from "@/translate/types.js";
 // Message ID
 // ──────────────────────────────────────────
 
-// One id per downstream request, shared by the OpenAI and Anthropic encoders.
+// One id per downstream request, shared by the OpenAI encoders.
 let _messageId = crypto.randomUUID();
 
 export function getMessageId(): string {
@@ -21,14 +21,48 @@ export function resetMessageId(): void {
 // ──────────────────────────────────────────
 
 export function extractUsage(data: Record<string, unknown>): UsageData | undefined {
-  const usage = data.usage as Record<string, unknown> | undefined;
-  if (!usage) return undefined;
-  return {
-    promptTokens: usage.promptTokens as number | undefined,
-    completionTokens: usage.completionTokens as number | undefined,
-    totalTokens: usage.totalTokens as number | undefined,
-    promptTokensDetails: usage.promptTokensDetails as { cachedTokens?: number } | undefined,
+  // The CC upstream reports usage under `totalUsage` with AI SDK camelCase fields
+  // (inputTokens/outputTokens/...). Some upstreams may use `usage` with snake_case.
+  // Support both shapes.
+  const u = (data.totalUsage ?? data.usage) as Record<string, unknown> | undefined;
+  if (!u) return undefined;
+
+  const num = (v: unknown): number | undefined => {
+    if (typeof v === "number") return v;
+    if (typeof v === "string" && v.trim() !== "") {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    return undefined;
   };
+
+  const promptTokens = num(u.promptTokens ?? u.inputTokens ?? u.prompt_tokens);
+  const completionTokens = num(u.completionTokens ?? u.outputTokens ?? u.completion_tokens);
+  const totalTokens =
+    num(u.totalTokens ?? u.total_tokens) ??
+    (promptTokens != null && completionTokens != null
+      ? promptTokens + completionTokens
+      : undefined);
+  const cached =
+    num(u.cachedInputTokens) ??
+    num((u.inputTokenDetails as { cacheReadTokens?: unknown } | undefined)?.cacheReadTokens) ??
+    num((u.promptTokensDetails as { cachedTokens?: unknown } | undefined)?.cachedTokens) ??
+    num((u.prompt_tokens_details as { cached_tokens?: unknown } | undefined)?.cached_tokens);
+  const reasoning =
+    num(u.reasoningTokens) ??
+    num((u.outputTokenDetails as { reasoningTokens?: unknown } | undefined)?.reasoningTokens) ??
+    num(
+      (u.completion_tokens_details as { reasoning_tokens?: unknown } | undefined)?.reasoning_tokens,
+    );
+
+  const result: UsageData = {};
+  if (promptTokens != null) result.promptTokens = promptTokens;
+  if (completionTokens != null) result.completionTokens = completionTokens;
+  if (totalTokens != null) result.totalTokens = totalTokens;
+  if (cached != null) result.promptTokensDetails = { cachedTokens: cached };
+  if (reasoning != null) result.completionTokensDetails = { reasoningTokens: reasoning };
+
+  return Object.keys(result).length > 0 ? result : undefined;
 }
 
 // ──────────────────────────────────────────

@@ -35,22 +35,26 @@ make docker-build  # Build Docker image
 src/
 ├── proxy.ts              # Entry point
 ├── config.ts             # Config loader (env, CLI, auth.json)
+├── logger.ts             # Structured logger
 ├── server.ts             # HTTP server & routes
 ├── models.json           # Model list & aliases
-├── translate/
-│   ├── types.ts          # Shared types
-│   ├── models.ts         # Model resolution & aliasing
-│   ├── util.ts           # CC helpers (messageId, usage, tool pruning)
-│   ├── openai.ts         # OpenAI ↔ CC translation
-│   └── anthropic.ts      # Anthropic ↔ CC translation
 ├── stream.ts             # NDJSON parser & SSE formatter
-└── upstream.ts           # CC API client
+├── upstream.ts           # CC API client
+├── setup/
+│   └── opencode.ts       # opencode.json bootstrap helper
+└── translate/
+    ├── types.ts          # Shared types
+    ├── models.ts         # Model resolution & aliasing
+    ├── util.ts           # CC helpers (messageId, usage, tool pruning)
+    ├── validation.ts     # Request validation
+    └── openai.ts         # OpenAI ↔ CC translation
 tests/
 ├── config.test.ts        # Config loader tests
 ├── server.test.ts        # HTTP server tests
 ├── stream.test.ts        # NDJSON parser & SSE tests
 ├── translate.test.ts     # Translation layer tests
 ├── upstream.test.ts      # Upstream client tests
+├── openai-schema.test.ts # ModelMessage[] schema conformance & usage
 └── e2e.test.ts           # End-to-end integration tests
 ```
 

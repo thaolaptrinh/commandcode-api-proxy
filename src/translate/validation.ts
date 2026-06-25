@@ -1,4 +1,4 @@
-import type { OpenAIChatRequest, AnthropicMessageRequest } from "./types.js";
+import type { OpenAIChatRequest } from "./types.js";
 
 export class ValidationError extends Error {
   constructor(message: string) {
@@ -38,41 +38,4 @@ export function validateOpenAIChatRequest(body: unknown): OpenAIChatRequest {
   }
 
   return body as OpenAIChatRequest;
-}
-
-export function validateAnthropicMessageRequest(body: unknown): AnthropicMessageRequest {
-  if (!body || typeof body !== "object") {
-    throw new ValidationError("Request body must be a JSON object");
-  }
-
-  const req = body as Record<string, unknown>;
-
-  if (typeof req.model !== "string") {
-    throw new ValidationError("Field 'model' must be a string");
-  }
-
-  if (typeof req.max_tokens !== "number") {
-    throw new ValidationError("Field 'max_tokens' must be a number");
-  }
-
-  if (!Array.isArray(req.messages)) {
-    throw new ValidationError("Field 'messages' must be an array");
-  }
-
-  for (let i = 0; i < req.messages.length; i++) {
-    const msg = req.messages[i];
-    if (!msg || typeof msg !== "object") {
-      throw new ValidationError(`messages[${i}] must be an object`);
-    }
-    const m = msg as Record<string, unknown>;
-    const validRoles = ["user", "assistant"];
-    if (typeof m.role !== "string" || !validRoles.includes(m.role)) {
-      throw new ValidationError(`messages[${i}].role must be one of: ${validRoles.join(", ")}`);
-    }
-    if (m.content === undefined) {
-      throw new ValidationError(`messages[${i}].content is required`);
-    }
-  }
-
-  return body as AnthropicMessageRequest;
 }
