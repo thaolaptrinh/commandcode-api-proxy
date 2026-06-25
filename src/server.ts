@@ -15,9 +15,15 @@ import {
 } from "@/translate/anthropic.js";
 import { getDefaultModels, fetchModelList } from "@/translate/models.js";
 import { resetMessageId } from "@/translate/util.js";
-import type { OpenAIChatRequest, AnthropicMessageRequest, CCEvent } from "@/translate/types.js";
+import type { CCEvent } from "@/translate/types.js";
 import { formatSSE, formatSSEDone } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
+import { logger } from "@/logger.js";
+import {
+  validateOpenAIChatRequest,
+  validateAnthropicMessageRequest,
+  ValidationError,
+} from "@/translate/validation.js";
 
 // ──────────────────────────────────────────
 // Mutable server state
@@ -150,7 +156,14 @@ async function handleChatCompletions(
   } catch {
     return sendJson(res, 400, { error: "Invalid JSON body" });
   }
-  if (!rawBody || typeof rawBody !== "object") {
+
+  let openAIReq;
+  try {
+    openAIReq = validateOpenAIChatRequest(rawBody);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return sendJson(res, 400, { error: err.message });
+    }
     return sendJson(res, 400, { error: "Invalid request body" });
   }
 
@@ -159,7 +172,6 @@ async function handleChatCompletions(
     return sendJson(res, 401, { error: "Unauthorized" });
   }
 
-  const openAIReq = rawBody as unknown as OpenAIChatRequest;
   const isStream = openAIReq.stream === true;
   const model = openAIReq.model ?? "default";
 
@@ -198,7 +210,7 @@ async function handleChatCompletions(
         res.end();
       });
       stream.on("error", (err: Error) => {
-        console.error("[stream]", err.message);
+        logger.error("[stream] OpenAI streaming error:", err.message);
         if (!res.destroyed) {
           res.write(formatSSE(toOpenAIErrorChunk(err)));
           res.write(formatSSEDone());
@@ -223,7 +235,14 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
   } catch {
     return sendJson(res, 400, { error: "Invalid JSON body" });
   }
-  if (!rawBody || typeof rawBody !== "object") {
+
+  let anthropicReq;
+  try {
+    anthropicReq = validateAnthropicMessageRequest(rawBody);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return sendJson(res, 400, { error: err.message });
+    }
     return sendJson(res, 400, { error: "Invalid request body" });
   }
 
@@ -232,7 +251,6 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
     return sendJson(res, 401, { error: "Unauthorized" });
   }
 
-  const anthropicReq = rawBody as unknown as AnthropicMessageRequest;
   const isStream = anthropicReq.stream === true;
   const model = anthropicReq.model ?? "default";
 
@@ -271,7 +289,7 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
       stream.on("data", flushAnthropic);
       stream.on("end", () => res.end());
       stream.on("error", (err: Error) => {
-        console.error("[anthropic-stream]", err.message);
+        logger.error("[anthropic-stream] Anthropic streaming error:", err.message);
         if (!res.destroyed) {
           res.write(`event: error\n`);
           res.write(formatSSE({ type: "error", error: { message: err.message } }));
@@ -356,14 +374,14 @@ export function createServer(cfg: Config): http.Server {
       const result = route.handler(req, res, parsedUrl);
       if (result instanceof Promise) {
         result.catch((err) => {
-          console.error("[route]", err);
+          logger.error("[route] handler promise error:", err);
           if (!res.headersSent) {
             sendJson(res, 500, { error: "Internal server error" });
           }
         });
       }
     } catch (err) {
-      console.error("[route]", err);
+      logger.error("[route] handler error:", err);
       if (!res.headersSent) {
         sendJson(res, 500, { error: "Internal server error" });
       }

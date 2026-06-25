@@ -3,6 +3,7 @@
 import { loadConfig, fetchLatestCliVersion } from "@/config.js";
 import { createServer } from "@/server.js";
 import { setupOpenCodeConfig } from "@/setup/opencode.js";
+import { initLogger } from "@/logger.js";
 
 const cli = process.argv.slice(2);
 if (cli.includes("--setup-opencode")) {
@@ -11,6 +12,7 @@ if (cli.includes("--setup-opencode")) {
 }
 
 const config = loadConfig();
+initLogger(config.logLevel);
 
 // Refresh the CLI version from npm so requests look current (CC blocks stale
 // versions). Env override (CC_CLI_VERSION) always wins; the fetch only fills
