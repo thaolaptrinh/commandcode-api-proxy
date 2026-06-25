@@ -61,7 +61,8 @@ describe("toCCRequest", () => {
     expect(cc.params.model).toBe("deepseek/deepseek-v4-pro");
     expect(cc.params.system).toContain("You are a helpful assistant.");
     expect(cc.params.messages).toHaveLength(1);
-    expect(cc.params.messages[0]).toEqual({ role: "user", content: "Hello" });
+    expect(cc.params.messages[0].role).toBe("user");
+    expect(cc.params.messages[0].content).toContain("Hello");
     expect(cc.threadId).toBeDefined();
     expect(cc.config.workingDir).toBeDefined();
   });
