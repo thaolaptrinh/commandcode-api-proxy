@@ -2,6 +2,13 @@
 
 import { loadConfig, fetchLatestCliVersion } from "@/config.js";
 import { createServer } from "@/server.js";
+import { setupOpenCodeConfig } from "@/setup/opencode.js";
+
+const cli = process.argv.slice(2);
+if (cli.includes("--setup-opencode")) {
+  await setupOpenCodeConfig();
+  process.exit(0);
+}
 
 const config = loadConfig();
 

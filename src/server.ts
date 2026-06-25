@@ -56,16 +56,22 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
 // ──────────────────────────────────────────
 
 function extractApiKey(req: http.IncomingMessage): string | null {
+  let key: string | null = null;
   const auth = req.headers.authorization;
   if (auth) {
     const m = auth.match(/^Bearer\s+(.+)$/i);
-    if (m) return m[1];
+    if (m) key = m[1];
   }
-  const xApiKey = req.headers["x-api-key"] as string | undefined;
-  if (xApiKey) return xApiKey;
+  if (!key) {
+    const xApiKey = req.headers["x-api-key"] as string | undefined;
+    if (xApiKey) key = xApiKey;
+  }
 
-  // If proxy has no key configured, the CC API key is the only fallback
-  return config.apiKey;
+  // If the client sent "placeholder" or no key, fall back to the proxy's configured key
+  if (!key || key === "placeholder") {
+    return config.apiKey;
+  }
+  return key;
 }
 
 // ──────────────────────────────────────────

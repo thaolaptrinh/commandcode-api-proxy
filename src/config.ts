@@ -5,6 +5,7 @@ interface CliArgs {
   host?: string;
   port?: string;
   "api-key"?: string;
+  "setup-opencode"?: boolean;
 }
 
 export interface Config {
@@ -64,6 +65,8 @@ function parseCliArgs(): CliArgs {
       if (val && !val.startsWith("--")) {
         (map as Record<string, string | undefined>)[key] = val;
         i++;
+      } else {
+        (map as Record<string, boolean>)[key] = true;
       }
     }
   }
