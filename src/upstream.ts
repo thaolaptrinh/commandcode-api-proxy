@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import { Readable } from "node:stream";
 import { parseCCLine } from "@/stream.js";
 import type { CCEvent, CCRequestBody } from "@/translate/types.js";
+import { logger } from "@/logger.js";
 
 interface UpstreamOptions {
   apiBase: string;
@@ -21,6 +22,7 @@ export function buildHeaders(
   body: CCRequestBody,
 ): Record<string, string> {
   const sessionId = body.threadId;
+  logger.debug(`Sending Authorization: Bearer ${apiKey.slice(0, 12)}... (length: ${apiKey.length})`);
   return {
     "Content-Type": "application/json",
     Accept: "application/json, */*",

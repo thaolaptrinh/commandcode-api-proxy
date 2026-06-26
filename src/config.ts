@@ -1,5 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
+import { readAuthKey } from "@/auth.js";
 
 interface CliArgs {
   host?: string;
@@ -73,35 +72,12 @@ function parseCliArgs(): CliArgs {
   return map;
 }
 
-function readAuthJson(): string | null {
-  const home = process.env.HOME || process.env.USERPROFILE;
-  if (!home) return null;
-
-  const paths = [
-    path.join(home, ".commandcode", "auth.json"),
-    path.join(home, ".config", "commandcode", "auth.json"),
-  ];
-
-  for (const p of paths) {
-    try {
-      const raw = fs.readFileSync(p, "utf-8");
-      const parsed = JSON.parse(raw);
-      if (parsed.apiKey) return parsed.apiKey;
-      if (parsed.accessToken) return parsed.accessToken;
-      if (parsed.token) return parsed.token;
-    } catch {
-      continue;
-    }
-  }
-  return null;
-}
-
 export function loadConfig(): Config {
   const cli = parseCliArgs();
 
   const host = cli.host || process.env.HOST || "127.0.0.1";
   const port = parseInt(cli.port || process.env.PORT || "8787", 10);
-  const apiKey = cli["api-key"] || process.env.CC_API_KEY || readAuthJson() || null;
+  const apiKey = cli["api-key"] || process.env.CC_API_KEY || readAuthKey();
   const ccApiBase = process.env.CC_API_BASE || "https://api.commandcode.ai";
   const ccVersion = process.env.CC_CLI_VERSION || cachedVersion || DEFAULT_CC_VERSION;
   const logLevel = process.env.LOG_LEVEL || "info";

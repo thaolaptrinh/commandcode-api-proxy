@@ -63,11 +63,13 @@ function extractApiKey(req: http.IncomingMessage): string | null {
     const xApiKey = req.headers["x-api-key"] as string | undefined;
     if (xApiKey) key = xApiKey;
   }
+  // If the client sent "proxy-managed" or no key, fall back to the proxy's configured key
 
-  // If the client sent "placeholder" or no key, fall back to the proxy's configured key
-  if (!key || key === "placeholder") {
+  if (!key || key === "proxy-managed" || key === "placeholder") {
+    logger.debug(`client key sentinel, using config key (prefix: "${config.apiKey?.slice(0, 8)}")`);
     return config.apiKey;
   }
+  logger.debug(`using client's own key (prefix: "${key.slice(0, 8)}")`);
   return key;
 }
 

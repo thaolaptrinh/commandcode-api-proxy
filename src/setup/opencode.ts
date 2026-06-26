@@ -1,18 +1,26 @@
 import fs from "node:fs";
 import path from "node:path";
-import readline from "node:readline";
 import modelsData from "@/models.json" with { type: "json" };
 
 function buildProviderConfig(): Record<string, unknown> {
-  const models: Record<string, { name: string }> = {};
+  const contextWindows: Record<string, number> = modelsData.contextWindows ?? {};
+  const maxOutputTokens: Record<string, number> = (modelsData as Record<string, unknown>).maxOutputTokens as Record<string, number> ?? {};
+  const modelNames: Record<string, string> = (modelsData as Record<string, unknown>).modelNames as Record<string, string> ?? {};
+  const models: Record<string, { name: string; limit: { context: number; output: number } }> = {};
   for (const id of modelsData.builtin) {
-    const short = id.split("/").pop() ?? id;
-    models[id] = { name: short };
+    const key = id.split("/").pop() ?? id;
+    models[key] = {
+      name: modelNames[id] ?? key,
+      limit: {
+        context: contextWindows[id] ?? 128_000,
+        output: maxOutputTokens[id] ?? 128_000,
+      },
+    };
   }
   return {
     npm: "@ai-sdk/openai-compatible",
     name: "Command Code",
-    options: { baseURL: "http://127.0.0.1:8787/v1", apiKey: "placeholder" },
+    options: { baseURL: "http://127.0.0.1:8787/v1", apiKey: "proxy-managed" },
     models,
   };
 }
@@ -40,23 +48,8 @@ function writeConfig(filePath: string, config: Record<string, unknown>): void {
   fs.writeFileSync(filePath, JSON.stringify(config, null, 2) + "\n");
 }
 
-function promptScope(): Promise<"local" | "global"> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((resolve) => {
-    console.log("\n? Select config scope:\n");
-    console.log("  1) Local  — ./opencode.json (project root)");
-    console.log("  2) Global — ~/.config/opencode/opencode.json\n");
-    rl.question("> ", (answer) => {
-      rl.close();
-      const choice = answer.trim();
-      if (choice === "1") return resolve("local");
-      return resolve("global");
-    });
-  });
-}
-
 export async function setupOpenCodeConfig(scope?: "local" | "global"): Promise<void> {
-  const chosen = scope ?? (await promptScope());
+  const chosen = scope ?? "global";
   const filePath = getConfigPath(chosen);
   const config = readConfig(filePath);
 

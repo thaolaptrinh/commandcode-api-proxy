@@ -2,11 +2,39 @@
 
 import { loadConfig, fetchLatestCliVersion } from "@/config.js";
 import { createServer } from "@/server.js";
+import { saveApiKey, promptForApiKey, readAuthKey, deleteAuth } from "@/auth.js";
 import { setupOpenCodeConfig } from "@/setup/opencode.js";
-import { initLogger } from "@/logger.js";
+import { logger, initLogger } from "@/logger.js";
 
-const cli = process.argv.slice(2);
-if (cli.includes("--setup-opencode")) {
+const args = process.argv.slice(2);
+
+if (args[0] === "auth") {
+  const sub = args[1];
+  if (sub === "login") {
+    const force = args.includes("--force");
+    const existing = readAuthKey();
+    if (existing && !force) {
+      console.log("\n  You are already logged in. Use `auth login --force` to overwrite.\n");
+      process.exit(0);
+    }
+    console.log("\n  Get your API key from https://commandcode.ai/settings\n");
+    const key = await promptForApiKey();
+    if (!key) {
+      console.error("  FATAL: API key is required.\n");
+      process.exit(1);
+    }
+    saveApiKey(key);
+    console.log("  ✓ API key saved to ~/.config/commandcode-api-proxy/auth.json\n");
+  } else if (sub === "logout") {
+    deleteAuth();
+    console.log("\n  ✓ API key removed\n");
+  } else {
+    console.error("\n  Usage: commandcode-api-proxy auth <login|logout>\n");
+  }
+  process.exit(0);
+}
+
+if (args.includes("--setup-opencode")) {
   await setupOpenCodeConfig();
   process.exit(0);
 }
@@ -14,19 +42,24 @@ if (cli.includes("--setup-opencode")) {
 const config = loadConfig();
 initLogger(config.logLevel);
 
-// Refresh the CLI version from npm so requests look current (CC blocks stale
-// versions). Env override (CC_CLI_VERSION) always wins; the fetch only fills
-// in when no override is set.
+logger.info(`API key source: ${process.env.CC_API_KEY ? "env CC_API_KEY" : config.apiKey ? "auth.json" : "none"} (length: ${config.apiKey?.length ?? 0})`);
+
 if (!process.env.CC_CLI_VERSION) {
   const latest = await fetchLatestCliVersion();
   if (latest) config.ccVersion = latest;
 }
 
 if (!config.apiKey) {
-  console.error("FATAL: No Command Code API key found.");
-  console.error("  Set CC_API_KEY environment variable or");
-  console.error("  run `npx command-code` to authenticate first.");
-  process.exit(1);
+  console.log("\n  No Command Code API key found.");
+  console.log("  You can get one from https://commandcode.ai/settings\n");
+  const key = await promptForApiKey();
+  if (!key) {
+    console.error("  FATAL: API key is required.\n");
+    process.exit(1);
+  }
+  saveApiKey(key);
+  config.apiKey = key;
+  console.log("  ✓ API key saved to ~/.config/commandcode-api-proxy/auth.json\n");
 }
 
 const server = createServer(config);
@@ -45,7 +78,6 @@ server.listen(config.port, config.host, () => {
   console.log("  Press Ctrl+C to stop\n");
 });
 
-// Graceful shutdown
 process.on("SIGINT", () => {
   console.log("\n  Shutting down...");
   server.close(() => process.exit(0));

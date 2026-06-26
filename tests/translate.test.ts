@@ -17,15 +17,9 @@ describe("resolveModel", () => {
     expect(resolveModel("default")).toBe(getDefaultModels()[0]);
   });
 
-  it("maps Claude model IDs", () => {
-    expect(resolveModel("claude-sonnet-4-6")).toBe("deepseek/deepseek-v4-pro");
-    expect(resolveModel("claude-opus-4-7")).toBe("deepseek/deepseek-v4-pro");
-    expect(resolveModel("claude-haiku-4")).toBe("deepseek/deepseek-v4-flash");
-  });
-
-  it("maps GPT model IDs", () => {
-    expect(resolveModel("gpt-4")).toBe("deepseek/deepseek-v4-pro");
-    expect(resolveModel("gpt-4o")).toBe("deepseek/deepseek-v4-pro");
+  it("passes unknown model IDs through", () => {
+    expect(resolveModel("claude-sonnet-4-6")).toBe("claude-sonnet-4-6");
+    expect(resolveModel("gpt-4")).toBe("gpt-4");
   });
 
   it("maps short aliases", () => {

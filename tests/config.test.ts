@@ -45,10 +45,10 @@ describe("loadConfig", () => {
     expect(config.apiKey).toBe("user_test_key");
   });
 
-  it("reads from ~/.commandcode/auth.json when no env key", async () => {
-    fs.mkdirSync(path.join(tmpHome, ".commandcode"), { recursive: true });
+  it("reads from auth.json when no env key", async () => {
+    fs.mkdirSync(path.join(tmpHome, ".config", "commandcode-api-proxy"), { recursive: true });
     fs.writeFileSync(
-      path.join(tmpHome, ".commandcode", "auth.json"),
+      path.join(tmpHome, ".config", "commandcode-api-proxy", "auth.json"),
       JSON.stringify({ apiKey: "user_from_auth_json" }),
     );
 

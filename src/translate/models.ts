@@ -3,7 +3,6 @@
 import modelsData from "@/models.json" with { type: "json" };
 
 const BUILTIN_MODELS: string[] = modelsData.builtin;
-const CLAUDE_MODEL_MAP: Record<string, string> = modelsData.claudeMap;
 const SHORT_ALIASES: Record<string, string> = modelsData.shortAliases;
 
 /**
@@ -34,8 +33,6 @@ export function resolveModel(model: string): string {
   if (!model || model === "default") {
     return BUILTIN_MODELS[0];
   }
-  const mapped = CLAUDE_MODEL_MAP[model];
-  if (mapped) return mapped;
   const aliased = SHORT_ALIASES[model];
   if (aliased) return aliased;
   // Already a full model ID (contains "/") — pass through untouched.

@@ -111,7 +111,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://127.0.0.1:8787/v1",
-    api_key="placeholder",
+    api_key="proxy-managed",
 )
 
 response = client.chat.completions.create(
@@ -129,7 +129,7 @@ response = client.chat.completions.create(
       "title": "Command Code",
       "provider": "openai",
       "model": "deepseek/deepseek-v4-pro",
-      "apiKey": "placeholder",
+      "apiKey": "proxy-managed",
       "apiBase": "http://127.0.0.1:8787/v1"
     }
   ]

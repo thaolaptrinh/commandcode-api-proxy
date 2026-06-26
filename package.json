@@ -37,6 +37,7 @@
     "lint": "vp lint",
     "fmt": "vp fmt",
     "fmt:check": "vp fmt --check",
+    "auth": "tsx src/proxy.ts auth",
     "check": "vp check",
     "prepublishOnly": "pnpm build && pnpm test"
   },
