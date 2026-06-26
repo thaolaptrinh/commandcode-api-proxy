@@ -16,28 +16,33 @@ pnpm install
 ## Commands
 
 ```bash
-make install       # Install dependencies
-make dev           # Dev mode with hot reload
-make build         # Build to dist/
-make test          # Run tests
-make test-watch    # Run tests in watch mode
-make test-coverage # Run tests with coverage
-make lint          # Lint with oxlint
-make fmt           # Format with oxfmt
-make typecheck     # Type-check with tsc
-make check         # Format + lint + typecheck + test + build
-make docker-build  # Build Docker image
+pnpm install      # Install dependencies
+pnpm dev          # Dev mode with hot reload (tsx)
+pnpm build        # Build to dist/
+pnpm test         # Run tests
+pnpm test:watch   # Run tests in watch mode
+pnpm test:coverage # Run tests with coverage
+
+# Auth management
+pnpm auth login   # Save API key
+pnpm auth logout  # Remove saved API key
+
+# OpenCode setup
+pnpm build && node dist/proxy.js --setup-opencode
 ```
+
+Scripts are defined in `package.json`. The `make` shortcuts are also available if you have `make` installed.
 
 ## Project structure
 
 ```
 src/
-├── proxy.ts              # Entry point
+├── proxy.ts              # Entry point (server, auth CLI, setup)
+├── auth.ts               # Auth helpers: read/save/delete key, masked prompt
 ├── config.ts             # Config loader (env, CLI, auth.json)
 ├── logger.ts             # Structured logger
 ├── server.ts             # HTTP server & routes
-├── models.json           # Model list & aliases
+├── models.json           # Model list, aliases, context windows
 ├── stream.ts             # NDJSON parser & SSE formatter
 ├── upstream.ts           # CC API client
 ├── setup/
@@ -49,6 +54,7 @@ src/
     ├── validation.ts     # Request validation
     └── openai.ts         # OpenAI ↔ CC translation
 tests/
+├── auth.test.ts          # Auth module tests
 ├── config.test.ts        # Config loader tests
 ├── server.test.ts        # HTTP server tests
 ├── stream.test.ts        # NDJSON parser & SSE tests
@@ -64,14 +70,14 @@ tests/
 # Build
 docker build -t commandcode-api-proxy .
 
-# Run
+# Run with env var
 docker run --rm -p 8787:8787 \
   -e CC_API_KEY=user_xxx \
   commandcode-api-proxy
 
 # Or mount auth.json
 docker run --rm -p 8787:8787 \
-  -v ~/.commandcode:/home/node/.commandcode:ro \
+  -v ~/.config/commandcode-api-proxy:/home/node/.config/commandcode-api-proxy:ro \
   commandcode-api-proxy
 
 # Using docker compose
