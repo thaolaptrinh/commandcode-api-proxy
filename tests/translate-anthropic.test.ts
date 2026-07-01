@@ -214,14 +214,14 @@ describe("toCCRequest", () => {
     expect(toCCRequest({ ...base, tool_choice: { type: "none" } }).params.tool_choice).toBe("none");
   });
 
-  it("no-tools safeguard injected", () => {
+  it("no-tools safeguard not injected for Anthropic", () => {
     const req: AnthropicRequest = {
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 100,
       messages: [{ role: "user", content: "Hello" }],
     };
     const result = toCCRequest(req);
-    expect(result.params.system).toContain("chat-only environment");
+    expect(result.params.system).toBeUndefined();
   });
 
   it("stream is passed through", () => {

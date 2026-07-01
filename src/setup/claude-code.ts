@@ -24,7 +24,7 @@ export async function setupClaudeCodeConfig(force: boolean): Promise<void> {
     env: {
       ANTHROPIC_BASE_URL: "http://127.0.0.1:8787",
       ANTHROPIC_API_KEY: "proxy-managed",
-      ANTHROPIC_AUTH_TOKEN: "proxy-managed",
+      ANTHROPIC_AUTH_TOKEN: "",
       API_TIMEOUT_MS: "3000000",
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: 1,
       ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek/deepseek-v4-pro",
