@@ -18,7 +18,6 @@ import {
   extractUsage,
   pruneDanglingTools,
   buildCCConfig,
-  applyNoToolsSafeguard,
 } from "@/translate/util.js";
 import { logger } from "@/logger.js";
 
@@ -72,8 +71,44 @@ function toCCMessages(messages: AnthropicRequest["messages"]): {
       if (typeof content === "string") {
         ccMessages.push({ role: "user", content });
       } else {
-        const parts = (content as AnthropicContentBlock[]).map(toCCPartFn(toolUseIdToName));
-        ccMessages.push({ role: "user", content: parts });
+        const blocks = content as AnthropicContentBlock[];
+        const hasToolResult = blocks.some((b) => b.type === "tool_result");
+        if (hasToolResult) {
+          const textParts: CCContentPart[] = [];
+          for (const block of blocks) {
+            if (block.type === "tool_result") {
+              const trb = block as ToolResultBlockParam;
+              const name = toolUseIdToName.get(trb.tool_use_id) ?? "";
+              const resultText =
+                typeof trb.content === "string"
+                  ? trb.content
+                  : (trb.content as Array<{ type: string; text?: string }>)
+                      .map((p) => p.text ?? "")
+                      .join("");
+              ccMessages.push({
+                role: "tool",
+                content: [
+                  {
+                    type: "tool-result",
+                    toolCallId: trb.tool_use_id,
+                    toolName: name,
+                    output: { type: "text", value: resultText },
+                    isError: trb.is_error,
+                  },
+                ],
+              });
+            } else {
+              const part = toCCPartByBlock(block);
+              if (part) textParts.push(part);
+            }
+          }
+          if (textParts.length > 0) {
+            ccMessages.push({ role: "user", content: textParts });
+          }
+        } else {
+          const parts = blocks.map((b) => toCCPartByBlock(b)).filter(Boolean) as CCContentPart[];
+          ccMessages.push({ role: "user", content: parts });
+        }
       }
       continue;
     }
@@ -94,7 +129,6 @@ function toCCMessages(messages: AnthropicRequest["messages"]): {
             input: block.input,
           });
         }
-        // thinking, redacted_thinking: dropped from history
       }
       if (parts.length > 0) {
         ccMessages.push({ role: "assistant", content: parts });
@@ -111,37 +145,16 @@ function toCCMessages(messages: AnthropicRequest["messages"]): {
   };
 }
 
-function toCCPartFn(
-  toolUseIdToName: Map<string, string>,
-): (block: AnthropicContentBlock) => CCContentPart {
-  return (block: AnthropicContentBlock): CCContentPart => {
-    if (block.type === "text") return { type: "text", text: block.text };
-    if (block.type === "image") {
-      const src = (block as ImageBlockParam).source;
-      if (src.type === "base64") {
-        return { type: "image", image: `data:${src.media_type};base64,${src.data}` };
-      }
-      return { type: "image", image: src.url };
+function toCCPartByBlock(block: AnthropicContentBlock): CCContentPart | null {
+  if (block.type === "text") return { type: "text", text: block.text };
+  if (block.type === "image") {
+    const src = (block as ImageBlockParam).source;
+    if (src.type === "base64") {
+      return { type: "image", image: `data:${src.media_type};base64,${src.data}` };
     }
-    if (block.type === "tool_result") {
-      const trb = block as ToolResultBlockParam;
-      const name = toolUseIdToName.get(trb.tool_use_id) ?? "";
-      const resultText =
-        typeof trb.content === "string"
-          ? trb.content
-          : (trb.content as Array<{ type: string; text?: string }>)
-              .map((p) => p.text ?? "")
-              .join("");
-      return {
-        type: "tool-result",
-        toolCallId: trb.tool_use_id,
-        toolName: name,
-        output: { type: "text", value: resultText },
-        isError: trb.is_error,
-      };
-    }
-    return { type: "text", text: "" };
-  };
+    return { type: "image", image: src.url };
+  }
+  return null;
 }
 
 function resolveReasoningEffort(thinking: AnthropicRequest["thinking"]): string | undefined {
@@ -212,12 +225,10 @@ export function toCCRequest(
     threadId: crypto.randomUUID(),
   };
 
+  // Add system prompt from top-level field
   if (finalSystem) {
     body.params.system = finalSystem;
   }
-
-  const hasTools = req.tools != null && req.tools.length > 0;
-  applyNoToolsSafeguard(body, ccMessages, hasTools);
 
   return body;
 }
@@ -228,6 +239,7 @@ export class AnthropicStreamEncoder {
   readonly messageId: string;
   private blockIndex = 0;
   private currentBlockType: "text" | "thinking" | "tool_use" | null = null;
+  private currentToolCallId: string | null = null;
   private pendingStart: CCEvent | null = null;
   private started = false;
   private pinged = false;
@@ -339,7 +351,7 @@ export class AnthropicStreamEncoder {
       case "tool-call-delta": {
         const tcId = (event.data.toolCallId as string) ?? "";
         const tcName = (event.data.name as string) ?? "";
-        if (this.currentBlockType !== "tool_use") {
+        if (this.currentBlockType !== "tool_use" || this.currentToolCallId !== tcId) {
           this.closeCurrentBlock(records);
           this.ensureBlockOpenWith(records, "tool_use", {
             type: "tool_use",
@@ -347,6 +359,7 @@ export class AnthropicStreamEncoder {
             name: tcName,
             input: {},
           });
+          this.currentToolCallId = tcId;
         }
         records.push(
           this.makeDelta({

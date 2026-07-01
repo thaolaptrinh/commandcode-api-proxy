@@ -487,6 +487,10 @@ export function createServer(cfg: Config): http.Server {
     const route = routes.find((r) => r.method === req.method && r.path === pathname);
 
     if (!route) {
+      const isAnthropic = req.headers["anthropic-version"] !== undefined;
+      if (isAnthropic) {
+        return sendAnthropicError(res, 404, "not_found_error", "Not found");
+      }
       return sendJson(res, 404, { error: "Not found" });
     }
 
