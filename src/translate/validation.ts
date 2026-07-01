@@ -83,7 +83,7 @@ export function validateAnthropicRequest(body: unknown): AnthropicRequest {
 
   for (let i = 0; i < req.messages.length; i++) {
     const msg = req.messages[i] as Record<string, unknown>;
-    if (msg.role !== "user" && msg.role !== "assistant") {
+    if (msg.role !== "user" && msg.role !== "assistant" && msg.role !== "system") {
       throw new ValidationError(`messages[${i}].role must be "user" or "assistant"`);
     }
     if (msg.content === undefined) {

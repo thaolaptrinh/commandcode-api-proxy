@@ -56,9 +56,17 @@ function toCCMessages(messages: AnthropicRequest["messages"]): {
   }
 
   const ccMessages: CCMessage[] = [];
+  const systemParts: string[] = [];
 
   for (const msg of messages) {
     const content = msg.content;
+
+    if (msg.role === "system") {
+      if (typeof content === "string") {
+        systemParts.push(content);
+      }
+      continue;
+    }
 
     if (msg.role === "user") {
       if (typeof content === "string") {
@@ -96,7 +104,10 @@ function toCCMessages(messages: AnthropicRequest["messages"]): {
 
   return {
     ccMessages: pruneDanglingTools(ccMessages),
-    systemPrompt: undefined,
+    systemPrompt:
+      systemParts.length > 0
+        ? systemParts.join("\n\n")
+        : undefined,
   };
 }
 

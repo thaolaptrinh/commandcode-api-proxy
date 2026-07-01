@@ -21,7 +21,7 @@ export interface AnthropicRequest {
 }
 
 export interface AnthropicMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "system";
   content: string | AnthropicContentBlock[];
 }
 

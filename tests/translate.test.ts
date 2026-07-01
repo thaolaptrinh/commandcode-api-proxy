@@ -363,7 +363,7 @@ describe("validateAnthropicRequest", () => {
       validateAnthropicRequest({
         model: "x",
         max_tokens: 10,
-        messages: [{ role: "system", content: "Hi" }],
+        messages: [{ role: "function", content: "Hi" }],
       }),
     ).toThrow(ValidationError);
   });
