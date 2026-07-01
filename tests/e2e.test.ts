@@ -148,7 +148,7 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as any;
-    expect(body.error).toBe("Invalid JSON body");
+    expect(body.error.message).toBe("Invalid JSON body");
   });
 });
 

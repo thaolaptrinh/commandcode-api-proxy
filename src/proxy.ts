@@ -42,7 +42,9 @@ if (args.includes("--setup-opencode")) {
 const config = loadConfig();
 initLogger(config.logLevel);
 
-logger.info(`API key source: ${process.env.CC_API_KEY ? "env CC_API_KEY" : config.apiKey ? "auth.json" : "none"} (length: ${config.apiKey?.length ?? 0})`);
+logger.info(
+  `API key source: ${process.env.CC_API_KEY ? "env CC_API_KEY" : config.apiKey ? "auth.json" : "none"} (length: ${config.apiKey?.length ?? 0})`,
+);
 
 if (!process.env.CC_CLI_VERSION) {
   const latest = await fetchLatestCliVersion();

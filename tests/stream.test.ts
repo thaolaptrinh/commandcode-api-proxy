@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { Readable } from "node:stream";
-import { parseCCLine, formatSSE, formatSSEDone, NDJSONParser } from "@/stream.js";
+import {
+  parseCCLine,
+  formatSSE,
+  formatSSEDone,
+  formatAnthropicSSE,
+  NDJSONParser,
+} from "@/stream.js";
 
 describe("parseCCLine", () => {
   it("parses a CC event with data: prefix", () => {
@@ -168,5 +174,34 @@ describe("NDJSONParser", () => {
 
     expect(events).toHaveLength(1);
     expect(events[0].data.text).toBe("flushed");
+  });
+});
+
+describe("formatAnthropicSSE", () => {
+  it("emits event + data lines", () => {
+    const result = formatAnthropicSSE("message_start", {
+      type: "message_start",
+      message: { id: "msg_1", model: "claude" },
+    });
+    expect(result).toContain("event: message_start");
+    expect(result).toContain("data: ");
+    expect(result).toContain("\n\n");
+  });
+
+  it("message_stop uses empty data", () => {
+    const result = formatAnthropicSSE("message_stop", {});
+    expect(result).toContain("event: message_stop");
+    expect(result).toContain("data: {}");
+  });
+
+  it("content_block_delta formats correctly", () => {
+    const result = formatAnthropicSSE("content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "Hello" },
+    });
+    expect(result).toContain("event: content_block_delta");
+    const parsed = JSON.parse(result.split("data: ")[1].trimEnd());
+    expect(parsed.delta.text).toBe("Hello");
   });
 });

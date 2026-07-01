@@ -56,12 +56,12 @@ Get your API key from https://commandcode.ai/settings.
 
 ### CLI options
 
-| Option      | Description          | Default     |
-| ----------- | -------------------- | ----------- |
-| `--host`    | Bind address         | `127.0.0.1` |
-| `--port`    | Port                 | `8787`      |
-| `--api-key` | Command Code API key | —           |
-| `--setup-opencode` | Generate OpenCode provider config | —    |
+| Option             | Description                       | Default     |
+| ------------------ | --------------------------------- | ----------- |
+| `--host`           | Bind address                      | `127.0.0.1` |
+| `--port`           | Port                              | `8787`      |
+| `--api-key`        | Command Code API key              | —           |
+| `--setup-opencode` | Generate OpenCode provider config | —           |
 
 ## Endpoints
 
@@ -77,6 +77,56 @@ curl http://127.0.0.1:8787/v1/chat/completions \
     "stream": true
   }'
 ```
+
+### `POST /v1/messages` (Anthropic)
+
+```bash
+curl http://127.0.0.1:8787/v1/messages \
+  -H "x-api-key: proxy-managed" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-5-20250929",
+    "max_tokens": 4096,
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+### `POST /v1/messages/count_tokens` (Anthropic)
+
+```bash
+curl http://127.0.0.1:8787/v1/messages/count_tokens \
+  -H "x-api-key: proxy-managed" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### Anthropic model mapping
+
+Anthropic clients send Claude model IDs (e.g., `claude-sonnet-4-5-20250929`).
+Map them to CC models via environment variables:
+
+```bash
+ANTHROPIC_DEFAULT_MODEL=deepseek/deepseek-v4-pro          # fallback for any unmapped Claude ID
+ANTHROPIC_MODEL_CLAUDE_SONNET_4_5=glm-5.1                  # map a specific Claude variant
+ANTHROPIC_MODEL_CLAUDE_OPUS_4_1=deepseek/deepseek-v4-pro
+ANTHROPIC_MODEL_CLAUDE_HAIKU=deepseek/deepseek-v4-flash
+```
+
+The proxy normalizes Claude IDs to env-var keys:
+`claude-sonnet-4-5-20250929` → `CLAUDE_SONNET_4_5`. Non-Claude model IDs
+pass through unchanged.
+
+### Anthropic limitations
+
+- **Thinking signatures**: placeholder only (not cryptographically signed).
+- **Cache control**: stripped (no CC analogue).
+- **Count tokens**: heuristic estimate, not exact.
+- **Built-in/server tools** (`computer_`, `bash_`, `web_search_`, etc.):
+  rejected with `invalid_request_error`. Only custom tools supported.
+- **`metadata`, `top_k`, `top_p`, `service_tier`**: accepted but dropped.
 
 ## Client configuration
 
@@ -102,19 +152,37 @@ Or add manually:
         "apiKey": "proxy-managed"
       },
       "models": {
-        "deepseek-v4-pro": { "name": "DeepSeek V4 Pro", "limit": { "context": 1048576, "output": 393216 } },
-        "deepseek-v4-flash": { "name": "DeepSeek V4 Flash", "limit": { "context": 1048576, "output": 393216 } },
+        "deepseek-v4-pro": {
+          "name": "DeepSeek V4 Pro",
+          "limit": { "context": 1048576, "output": 393216 }
+        },
+        "deepseek-v4-flash": {
+          "name": "DeepSeek V4 Flash",
+          "limit": { "context": 1048576, "output": 393216 }
+        },
         "MiniMax-M2.7": { "name": "MiniMax M2.7", "limit": { "context": 204800, "output": 32768 } },
         "MiniMax-M2.5": { "name": "MiniMax M2.5", "limit": { "context": 204800, "output": 32768 } },
         "GLM-5.1": { "name": "GLM-5.1", "limit": { "context": 200000, "output": 131072 } },
         "GLM-5": { "name": "GLM-5", "limit": { "context": 200000, "output": 131072 } },
         "Kimi-K2.6": { "name": "Kimi K2.6", "limit": { "context": 262144, "output": 98304 } },
         "Kimi-K2.5": { "name": "Kimi K2.5", "limit": { "context": 262144, "output": 98304 } },
-        "Qwen3.6-Max-Preview": { "name": "Qwen 3.6 Max Preview", "limit": { "context": 262144, "output": 65536 } },
-        "Qwen3.6-Plus": { "name": "Qwen 3.6 Plus", "limit": { "context": 1048576, "output": 65536 } },
+        "Qwen3.6-Max-Preview": {
+          "name": "Qwen 3.6 Max Preview",
+          "limit": { "context": 262144, "output": 65536 }
+        },
+        "Qwen3.6-Plus": {
+          "name": "Qwen 3.6 Plus",
+          "limit": { "context": 1048576, "output": 65536 }
+        },
         "Qwen3.7-Max": { "name": "Qwen 3.7 Max", "limit": { "context": 1048576, "output": 65536 } },
-        "Qwen3.7-Plus": { "name": "Qwen 3.7 Plus", "limit": { "context": 1048576, "output": 65536 } },
-        "Step-3.5-Flash": { "name": "Step 3.5 Flash", "limit": { "context": 262144, "output": 65536 } },
+        "Qwen3.7-Plus": {
+          "name": "Qwen 3.7 Plus",
+          "limit": { "context": 1048576, "output": 65536 }
+        },
+        "Step-3.5-Flash": {
+          "name": "Step 3.5 Flash",
+          "limit": { "context": 262144, "output": 65536 }
+        },
         "mimo-v2.5": { "name": "MiMo V2.5", "limit": { "context": 1048576, "output": 131072 } }
       }
     }
@@ -154,20 +222,46 @@ response = client.chat.completions.create(
 }
 ```
 
+### Claude Code
+
+Set the base URL and API key in your environment:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
+export ANTHROPIC_API_KEY=proxy-managed
+```
+
+### Anthropic SDK (Python)
+
+```python
+from anthropic import Anthropic
+
+client = Anthropic(
+    base_url="http://127.0.0.1:8787/v1",
+    api_key="proxy-managed",
+)
+
+message = client.messages.create(
+    model="claude-sonnet-4-5-20250929",
+    max_tokens=4096,
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+```
+
 ## Model aliases
 
 Short names work in addition to full model IDs:
 
-| Alias                                  | Maps to                      |
-| -------------------------------------- | ---------------------------- |
-| `deepseek-v4-pro`, `deepseek-v4`       | `deepseek/deepseek-v4-pro`   |
-| `deepseek-v4-flash`, `deepseek-flash`  | `deepseek/deepseek-v4-flash` |
-| `minimax-m2.7`, `minimax-m2.5`         | `MiniMaxAI/MiniMax-*`        |
-| `glm-5.1`, `glm-5`                     | `zai-org/GLM-*`              |
-| `kimi-k2.6`, `kimi-k2.5`               | `moonshotai/Kimi-*`          |
-| `qwen3.6-max`, `qwen3.6-plus`          | `Qwen/Qwen3.6-*`             |
-| `step3.5`                              | `stepfun/Step-3.5-Flash`     |
-| `mimo-v2.5`                            | `xiaomi/mimo-v2.5`           |
+| Alias                                 | Maps to                      |
+| ------------------------------------- | ---------------------------- |
+| `deepseek-v4-pro`, `deepseek-v4`      | `deepseek/deepseek-v4-pro`   |
+| `deepseek-v4-flash`, `deepseek-flash` | `deepseek/deepseek-v4-flash` |
+| `minimax-m2.7`, `minimax-m2.5`        | `MiniMaxAI/MiniMax-*`        |
+| `glm-5.1`, `glm-5`                    | `zai-org/GLM-*`              |
+| `kimi-k2.6`, `kimi-k2.5`              | `moonshotai/Kimi-*`          |
+| `qwen3.6-max`, `qwen3.6-plus`         | `Qwen/Qwen3.6-*`             |
+| `step3.5`                             | `stepfun/Step-3.5-Flash`     |
+| `mimo-v2.5`                           | `xiaomi/mimo-v2.5`           |
 
 Any model ID is passed through as-is — the proxy does not validate against a fixed list.
 

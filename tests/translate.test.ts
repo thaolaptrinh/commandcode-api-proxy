@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { toCCRequest, buildNonStreamingResponse, toOpenAIStreamChunk } from "@/translate/openai.js";
+import { toCCRequest, buildNonStreamingResponse, OpenAIStreamEncoder } from "@/translate/openai.js";
 import { resolveModel, getDefaultModels } from "@/translate/models.js";
-import { resetMessageId } from "@/translate/util.js";
 import type { OpenAIChatRequest, CCEvent } from "@/translate/types.js";
 
 // ──────────────────────────────────────────
@@ -218,14 +217,18 @@ describe("toCCRequest", () => {
 });
 
 // ──────────────────────────────────────────
-// toOpenAIStreamChunk
+// OpenAIStreamEncoder
 // ──────────────────────────────────────────
 
-describe("toOpenAIStreamChunk", () => {
-  beforeEach(() => resetMessageId());
+describe("OpenAIStreamEncoder", () => {
+  let encoder: OpenAIStreamEncoder;
+
+  beforeEach(() => {
+    encoder = new OpenAIStreamEncoder("test-model");
+  });
 
   it("converts start event to role chunk", () => {
-    const chunks = toOpenAIStreamChunk({
+    const chunks = encoder.emit({
       type: "start",
       data: { model: "deepseek/deepseek-v4-pro" },
     });
@@ -235,7 +238,7 @@ describe("toOpenAIStreamChunk", () => {
   });
 
   it("converts text-delta to content chunk", () => {
-    const chunks = toOpenAIStreamChunk({
+    const chunks = encoder.emit({
       type: "text-delta",
       data: { text: "Hello" },
     });
@@ -244,7 +247,7 @@ describe("toOpenAIStreamChunk", () => {
   });
 
   it("converts reasoning-delta to reasoning_content chunk", () => {
-    const chunks = toOpenAIStreamChunk({
+    const chunks = encoder.emit({
       type: "reasoning-delta",
       data: { text: "thinking..." },
     });
@@ -253,7 +256,7 @@ describe("toOpenAIStreamChunk", () => {
   });
 
   it("converts finish event with usage", () => {
-    const chunks = toOpenAIStreamChunk({
+    const chunks = encoder.emit({
       type: "finish",
       data: {
         finishReason: "stop",
@@ -279,7 +282,7 @@ describe("toOpenAIStreamChunk", () => {
     };
 
     for (const [from, to] of Object.entries(map)) {
-      const chunks = toOpenAIStreamChunk({
+      const chunks = encoder.emit({
         type: "finish",
         data: { finishReason: from as string },
       });
@@ -293,8 +296,6 @@ describe("toOpenAIStreamChunk", () => {
 // ──────────────────────────────────────────
 
 describe("buildNonStreamingResponse", () => {
-  beforeEach(() => resetMessageId());
-
   it("builds response from text-delta events", () => {
     const events: CCEvent[] = [
       { type: "start", data: { model: "deepseek/deepseek-v4-pro" } },
@@ -303,7 +304,12 @@ describe("buildNonStreamingResponse", () => {
       { type: "finish", data: { finishReason: "stop", usage: { totalTokens: 5 } } },
     ];
 
-    const resp = buildNonStreamingResponse(events, "deepseek/deepseek-v4-pro") as any;
+    const resp = buildNonStreamingResponse(
+      events,
+      "deepseek/deepseek-v4-pro",
+      "test-id-123",
+    ) as any;
+    expect(resp.id).toBe("test-id-123");
     expect(resp.choices[0].message.content).toBe("Hello world");
     expect(resp.choices[0].finish_reason).toBe("stop");
     expect(resp.usage.total_tokens).toBe(5);
@@ -317,8 +323,153 @@ describe("buildNonStreamingResponse", () => {
       { type: "finish", data: { finishReason: "stop" } },
     ];
 
-    const resp = buildNonStreamingResponse(events, "model") as any;
+    const resp = buildNonStreamingResponse(events, "model", "test-id-456") as any;
+    expect(resp.id).toBe("test-id-456");
     expect(resp.choices[0].message.reasoning_content).toBe("thinking");
     expect(resp.choices[0].message.content).toBe("Answer");
+  });
+});
+
+// ──────────────────────────────────────────
+// validateAnthropicRequest
+// ──────────────────────────────────────────
+
+import { validateAnthropicRequest, ValidationError } from "@/translate/validation.js";
+
+describe("validateAnthropicRequest", () => {
+  it("rejects non-object body", () => {
+    expect(() => validateAnthropicRequest(null)).toThrow(ValidationError);
+    expect(() => validateAnthropicRequest("string")).toThrow(ValidationError);
+  });
+
+  it("rejects missing model", () => {
+    expect(() => validateAnthropicRequest({ max_tokens: 10, messages: [] })).toThrow(
+      ValidationError,
+    );
+  });
+
+  it("rejects missing max_tokens", () => {
+    expect(() =>
+      validateAnthropicRequest({ model: "x", messages: [{ role: "user", content: "Hi" }] }),
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects missing messages", () => {
+    expect(() => validateAnthropicRequest({ model: "x", max_tokens: 10 })).toThrow(ValidationError);
+  });
+
+  it("rejects invalid message role", () => {
+    expect(() =>
+      validateAnthropicRequest({
+        model: "x",
+        max_tokens: 10,
+        messages: [{ role: "system", content: "Hi" }],
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects message missing content", () => {
+    expect(() =>
+      validateAnthropicRequest({
+        model: "x",
+        max_tokens: 10,
+        messages: [{ role: "user" }],
+      }),
+    ).toThrow(ValidationError);
+  });
+
+  it("rejects document content block", () => {
+    expect(() =>
+      validateAnthropicRequest({
+        model: "x",
+        max_tokens: 10,
+        messages: [
+          {
+            role: "user",
+            content: [{ type: "document", source: {} }],
+          },
+        ],
+      }),
+    ).toThrow(/document.*not supported/);
+  });
+
+  it("rejects built-in tool type", () => {
+    expect(() =>
+      validateAnthropicRequest({
+        model: "x",
+        max_tokens: 10,
+        messages: [{ role: "user", content: "Hi" }],
+        tools: [{ type: "computer_20241022", name: "computer", input_schema: {} }],
+      }),
+    ).toThrow(/computer_20241022.*not supported/);
+  });
+
+  it("rejects thinking.budget_tokens >= max_tokens", () => {
+    expect(() =>
+      validateAnthropicRequest({
+        model: "x",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "Hi" }],
+        thinking: { type: "enabled", budget_tokens: 200 },
+      }),
+    ).toThrow(/budget_tokens.*less than max_tokens/);
+  });
+
+  it("accepts valid request", () => {
+    const req = validateAnthropicRequest({
+      model: "claude-sonnet-4-5-20250929",
+      max_tokens: 4096,
+      messages: [{ role: "user", content: "Hello" }],
+    });
+    expect(req.model).toBe("claude-sonnet-4-5-20250929");
+    expect(req.max_tokens).toBe(4096);
+  });
+});
+
+describe("concurrency", () => {
+  it("two encoders produce independent IDs and toolCallIndex sequences", () => {
+    const encoderA = new OpenAIStreamEncoder("model-a");
+    const encoderB = new OpenAIStreamEncoder("model-b");
+
+    expect(encoderA.id).not.toBe(encoderB.id);
+
+    encoderA.emit({ type: "start", data: {} });
+    encoderB.emit({ type: "start", data: {} });
+
+    const tcA1 = encoderA.emit({
+      type: "tool-call",
+      data: { toolCallId: "c1", toolName: "fnA", input: {} },
+    });
+    const tcB1 = encoderB.emit({
+      type: "tool-call",
+      data: { toolCallId: "c2", toolName: "fnB", input: {} },
+    });
+    const tcA2 = encoderA.emit({
+      type: "tool-call",
+      data: { toolCallId: "c3", toolName: "fnA2", input: {} },
+    });
+
+    const getIndex = (chunks: object[]) => {
+      const toolCallChunks = chunks.filter((c: Record<string, unknown>) => {
+        const choices = c.choices as Record<string, unknown>[] | undefined;
+        return (
+          choices?.[0]?.delta != null &&
+          (choices[0].delta as Record<string, unknown>).tool_calls != null
+        );
+      });
+      const indices: number[] = [];
+      for (const chunk of toolCallChunks) {
+        const tc = (chunk as { choices: { delta: { tool_calls: { index: number }[] } }[] })
+          .choices[0].delta.tool_calls;
+        for (const t of tc) indices.push(t.index);
+      }
+      return indices;
+    };
+
+    const indicesA = getIndex([...tcA1, ...tcA2]);
+    expect(indicesA).toEqual([0, 1]);
+
+    const indicesB = getIndex(tcB1);
+    expect(indicesB).toEqual([0]);
   });
 });

@@ -2,19 +2,23 @@ import http from "node:http";
 import { Readable } from "node:stream";
 import { URL } from "node:url";
 import type { Config } from "@/config.js";
+import { toCCRequest, OpenAIStreamEncoder, buildNonStreamingResponse } from "@/translate/openai.js";
 import {
-  toCCRequest,
-  toOpenAIStreamChunk,
-  toOpenAIErrorChunk,
-  buildNonStreamingResponse,
-} from "@/translate/openai.js";
+  toCCRequest as anToCCRequest,
+  AnthropicStreamEncoder,
+  buildAnthropicResponse,
+} from "@/translate/anthropic.js";
 import { getDefaultModels, fetchModelList } from "@/translate/models.js";
-import { resetMessageId } from "@/translate/util.js";
 import type { CCEvent } from "@/translate/types.js";
-import { formatSSE, formatSSEDone } from "@/stream.js";
+import { formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
 import { logger } from "@/logger.js";
-import { validateOpenAIChatRequest, ValidationError } from "@/translate/validation.js";
+import {
+  validateOpenAIChatRequest,
+  validateAnthropicRequest,
+  ValidationError,
+} from "@/translate/validation.js";
+import type { AnthropicRequest } from "@/translate/anthropic-types.js";
 
 // ──────────────────────────────────────────
 // Mutable server state
@@ -85,6 +89,30 @@ function sendJson(res: http.ServerResponse, status: number, data: unknown): void
   res.end(JSON.stringify(data));
 }
 
+function sendOpenAIError(res: http.ServerResponse, status: number, message: string): void {
+  sendJson(res, status, { error: { message, type: "proxy_error" } });
+}
+
+const ANTHROPIC_STATUS_ERROR_MAP: Record<number, string> = {
+  400: "invalid_request_error",
+  401: "authentication_error",
+  403: "permission_error",
+  404: "not_found_error",
+  429: "rate_limit_error",
+  500: "api_error",
+  529: "overloaded_error",
+};
+
+function sendAnthropicError(
+  res: http.ServerResponse,
+  status: number,
+  type: string,
+  message: string,
+): void {
+  res.writeHead(status, { "Content-Type": "application/json", ...corsHeaders() });
+  res.end(JSON.stringify({ type: "error", error: { type, message } }));
+}
+
 function corsHeaders(): Record<string, string> {
   return {
     "Access-Control-Allow-Origin": "*",
@@ -126,7 +154,29 @@ function handleHealth(_req: http.IncomingMessage, res: http.ServerResponse): voi
   });
 }
 
-function handleModels(_req: http.IncomingMessage, res: http.ServerResponse): void {
+function handleModels(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const isAnthropic = req.headers["anthropic-version"] !== undefined;
+
+  if (isAnthropic) {
+    const items = modelList;
+    const data = {
+      data: items.map((id: string) => ({
+        id,
+        type: "model" as const,
+        display_name: id,
+        created_at: new Date().toISOString(),
+        max_input_tokens: null as number | null,
+        max_tokens: null as number | null,
+        capabilities: null,
+      })),
+      has_more: false,
+      first_id: items.length > 0 ? items[0] : null,
+      last_id: items.length > 0 ? items[items.length - 1] : null,
+    };
+    sendJson(res, 200, data);
+    return;
+  }
+
   const data = {
     object: "list",
     data: modelList.map((id: string) => ({
@@ -147,7 +197,7 @@ async function handleChatCompletions(
   try {
     rawBody = await parseBody(req);
   } catch {
-    return sendJson(res, 400, { error: "Invalid JSON body" });
+    return sendOpenAIError(res, 400, "Invalid JSON body");
   }
 
   let openAIReq;
@@ -155,18 +205,19 @@ async function handleChatCompletions(
     openAIReq = validateOpenAIChatRequest(rawBody);
   } catch (err) {
     if (err instanceof ValidationError) {
-      return sendJson(res, 400, { error: err.message });
+      return sendOpenAIError(res, 400, err.message);
     }
-    return sendJson(res, 400, { error: "Invalid request body" });
+    return sendOpenAIError(res, 400, "Invalid request body");
   }
 
   const apiKey = extractApiKey(req);
   if (!apiKey) {
-    return sendJson(res, 401, { error: "Unauthorized" });
+    return sendOpenAIError(res, 401, "Unauthorized");
   }
 
   const isStream = openAIReq.stream === true;
   const model = openAIReq.model ?? "default";
+  const encoder = new OpenAIStreamEncoder(model);
 
   logger.info(`[Incoming Request] Model: ${model}`);
   logger.info(`[Incoming Request] Tools count: ${openAIReq.tools ? openAIReq.tools.length : 0}`);
@@ -178,7 +229,6 @@ async function handleChatCompletions(
     logger.info(`[Incoming Request] No tools were sent by the client!`);
   }
 
-  resetMessageId();
   const ccBody = toCCRequest(openAIReq);
 
   const abort = abortOnClientDisconnect(req, res);
@@ -204,7 +254,7 @@ async function handleChatCompletions(
       });
 
       stream.on("data", (event: CCEvent) => {
-        for (const chunk of toOpenAIStreamChunk(event, model)) {
+        for (const chunk of encoder.emit(event)) {
           res.write(formatSSE(chunk));
         }
       });
@@ -215,7 +265,7 @@ async function handleChatCompletions(
       stream.on("error", (err: Error) => {
         logger.error("[stream] OpenAI streaming error:", err.message);
         if (!res.destroyed) {
-          res.write(formatSSE(toOpenAIErrorChunk(err)));
+          res.write(formatSSE(encoder.errorChunk(err)));
           res.write(formatSSEDone());
           res.end();
         }
@@ -223,28 +273,173 @@ async function handleChatCompletions(
       destroyStreamOnClientDisconnect(req, stream);
     } else {
       const events = await collectEvents(stream);
-      const response = buildNonStreamingResponse(events, model);
+      const response = buildNonStreamingResponse(events, model, encoder.id);
       sendJson(res, 200, response);
     }
   } catch (err) {
-    handleUpstreamError(res, err);
+    handleUpstreamError(res, err, "openai");
   }
+}
+
+async function handleMessages(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  let rawBody: unknown;
+  try {
+    rawBody = await parseBody(req);
+  } catch {
+    return sendAnthropicError(res, 400, "invalid_request_error", "Invalid JSON body");
+  }
+
+  let anthropicReq: AnthropicRequest;
+  try {
+    anthropicReq = validateAnthropicRequest(rawBody);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      return sendAnthropicError(res, 400, "invalid_request_error", err.message);
+    }
+    return sendAnthropicError(res, 400, "invalid_request_error", "Invalid request body");
+  }
+
+  const apiKey = extractApiKey(req);
+  if (!apiKey) {
+    return sendAnthropicError(res, 401, "authentication_error", "Missing API key");
+  }
+
+  const isStream = anthropicReq.stream === true;
+  const model = anthropicReq.model;
+
+  const encoder = new AnthropicStreamEncoder(model);
+  const ccBody = anToCCRequest(anthropicReq);
+
+  const abort = abortOnClientDisconnect(req, res);
+
+  try {
+    const result = await sendToCC(
+      ccBody,
+      { apiBase: config.ccApiBase, apiKey, ccVersion: config.ccVersion },
+      abort.signal,
+    );
+    const stream = result.stream;
+
+    if (isStream) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+        ...corsHeaders(),
+      });
+
+      stream.on("data", (event: CCEvent) => {
+        for (const record of encoder.emit(event)) {
+          res.write(formatAnthropicSSE(record.event, record.data));
+        }
+      });
+      stream.on("end", () => res.end());
+      stream.on("error", (err: Error) => {
+        logger.error("[stream] Anthropic streaming error:", err.message);
+        if (!res.destroyed) {
+          res.write(
+            formatAnthropicSSE("error", {
+              type: "error",
+              error: { type: "api_error", message: err.message },
+            }),
+          );
+          res.end();
+        }
+      });
+      destroyStreamOnClientDisconnect(req, stream);
+    } else {
+      const events = await collectEvents(stream);
+      const response = buildAnthropicResponse(events, model, encoder.messageId);
+      res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
+      res.end(JSON.stringify(response));
+    }
+  } catch (err) {
+    handleUpstreamError(res, err, "anthropic");
+  }
+}
+
+async function handleCountTokens(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+): Promise<void> {
+  let rawBody: unknown;
+  try {
+    rawBody = await parseBody(req);
+  } catch {
+    return sendAnthropicError(res, 400, "invalid_request_error", "Invalid JSON body");
+  }
+
+  const body = rawBody as Record<string, unknown>;
+
+  const parts: string[] = [];
+  if (typeof body.system === "string") parts.push(body.system);
+  else if (Array.isArray(body.system)) {
+    for (const b of body.system as { text?: string }[]) {
+      if (b.text) parts.push(b.text);
+    }
+  }
+  const msgs = body.messages as { content?: unknown }[] | undefined;
+  if (msgs) {
+    for (const msg of msgs) {
+      parts.push(typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content));
+    }
+  }
+  const tools = body.tools as
+    | { name?: string; description?: string; input_schema?: unknown }[]
+    | undefined;
+  if (tools) {
+    for (const t of tools) {
+      parts.push(t.name ?? "", t.description ?? "", JSON.stringify(t.input_schema ?? {}));
+    }
+  }
+
+  const allText = parts.join("");
+  let cjk = 0;
+  let nonCjk = 0;
+  for (const ch of allText) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0x3040 && code <= 0x309f) ||
+      (code >= 0x30a0 && code <= 0x30ff) ||
+      (code >= 0xac00 && code <= 0xd7af)
+    ) {
+      cjk++;
+    } else {
+      nonCjk++;
+    }
+  }
+
+  const estimated = Math.ceil(cjk + nonCjk / 4);
+
+  sendJson(res, 200, { input_tokens: estimated });
 }
 
 // ──────────────────────────────────────────
 // Error handling
 // ──────────────────────────────────────────
 
-function handleUpstreamError(res: http.ServerResponse, err: unknown): void {
+function handleUpstreamError(
+  res: http.ServerResponse,
+  err: unknown,
+  format: "openai" | "anthropic",
+): void {
+  if (format === "anthropic") {
+    if (err instanceof UpstreamError) {
+      const status = err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 502;
+      const type = ANTHROPIC_STATUS_ERROR_MAP[status] ?? "api_error";
+      sendAnthropicError(res, status, type, err.message);
+    } else {
+      sendAnthropicError(res, 502, "api_error", (err as Error).message);
+    }
+    return;
+  }
+
   if (err instanceof UpstreamError) {
     const status = err.statusCode >= 400 && err.statusCode < 500 ? err.statusCode : 502;
-    sendJson(res, status, {
-      error: { message: err.message, type: "upstream_error", code: err.statusCode },
-    });
+    sendOpenAIError(res, status, err.message);
   } else {
-    sendJson(res, 502, {
-      error: { message: (err as Error).message, type: "proxy_error" },
-    });
+    sendOpenAIError(res, 502, (err as Error).message);
   }
 }
 
@@ -276,6 +471,8 @@ export function createServer(cfg: Config): http.Server {
     { method: "GET", path: "/health", handler: handleHealth },
     { method: "GET", path: "/v1/models", handler: handleModels },
     { method: "POST", path: "/v1/chat/completions", handler: handleChatCompletions },
+    { method: "POST", path: "/v1/messages", handler: handleMessages },
+    { method: "POST", path: "/v1/messages/count_tokens", handler: handleCountTokens },
   ];
 
   const server = http.createServer((req, res) => {
