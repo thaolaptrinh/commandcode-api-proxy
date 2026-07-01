@@ -77,5 +77,3 @@ export async function promptForApiKey(): Promise<string> {
     stdin.on("data", onData);
   });
 }
-
-

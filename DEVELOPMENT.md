@@ -46,19 +46,27 @@ src/
 ├── stream.ts             # NDJSON parser & SSE formatter
 ├── upstream.ts           # CC API client
 ├── setup/
+│   ├── opencode.ts       # opencode.json bootstrap helper
+│   └── claude-code.ts    # claude-code config + model mapping setup
+├── translate/
+│   ├── types.ts          # Shared types (OpenAI, CC, UsageData)
+│   ├── models.ts         # Model resolution & aliasing
+│   ├── util.ts           # CC helpers (usage, tool pruning, safeguard)
+│   ├── validation.ts     # Request validation (OpenAI + Anthropic)
+│   ├── openai.ts         # OpenAI ↔ CC translation
+│   ├── anthropic-types.ts # Anthropic API types
+│   ├── anthropic-models.ts # Env-based Anthropic model mapping
+│   └── anthropic.ts      # Anthropic ↔ CC translation
+setup/
 │   └── opencode.ts       # opencode.json bootstrap helper
-└── translate/
-    ├── types.ts          # Shared types
-    ├── models.ts         # Model resolution & aliasing
-    ├── util.ts           # CC helpers (messageId, usage, tool pruning)
-    ├── validation.ts     # Request validation
-    └── openai.ts         # OpenAI ↔ CC translation
 tests/
 ├── auth.test.ts          # Auth module tests
 ├── config.test.ts        # Config loader tests
 ├── server.test.ts        # HTTP server tests
 ├── stream.test.ts        # NDJSON parser & SSE tests
-├── translate.test.ts     # Translation layer tests
+├── translate.test.ts     # OpenAI translation layer tests
+├── translate-anthropic.test.ts # Anthropic translation tests
+├── anthropic-models.test.ts    # Model mapping tests
 ├── upstream.test.ts      # Upstream client tests
 ├── openai-schema.test.ts # ModelMessage[] schema conformance & usage
 └── e2e.test.ts           # End-to-end integration tests

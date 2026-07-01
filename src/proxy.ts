@@ -4,6 +4,7 @@ import { loadConfig, fetchLatestCliVersion } from "@/config.js";
 import { createServer } from "@/server.js";
 import { saveApiKey, promptForApiKey, readAuthKey, deleteAuth } from "@/auth.js";
 import { setupOpenCodeConfig } from "@/setup/opencode.js";
+import { setupClaudeCodeConfig } from "@/setup/claude-code.js";
 import { logger, initLogger } from "@/logger.js";
 
 const args = process.argv.slice(2);
@@ -39,10 +40,18 @@ if (args.includes("--setup-opencode")) {
   process.exit(0);
 }
 
+if (args.includes("--setup-claude-code")) {
+  const force = args.includes("--force");
+  await setupClaudeCodeConfig(force);
+  process.exit(0);
+}
+
 const config = loadConfig();
 initLogger(config.logLevel);
 
-logger.info(`API key source: ${process.env.CC_API_KEY ? "env CC_API_KEY" : config.apiKey ? "auth.json" : "none"} (length: ${config.apiKey?.length ?? 0})`);
+logger.info(
+  `API key source: ${process.env.CC_API_KEY ? "env CC_API_KEY" : config.apiKey ? "auth.json" : "none"} (length: ${config.apiKey?.length ?? 0})`,
+);
 
 if (!process.env.CC_CLI_VERSION) {
   const latest = await fetchLatestCliVersion();
@@ -74,6 +83,8 @@ server.listen(config.port, config.host, () => {
   console.log("    GET  /health");
   console.log("    GET  /v1/models");
   console.log("    POST /v1/chat/completions  (OpenAI format)");
+  console.log("    POST /v1/messages          (Anthropic format)");
+  console.log("    POST /v1/messages/count_tokens  (Anthropic format)");
   console.log("");
   console.log("  Press Ctrl+C to stop\n");
 });

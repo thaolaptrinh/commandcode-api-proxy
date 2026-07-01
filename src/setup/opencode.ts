@@ -4,8 +4,10 @@ import modelsData from "@/models.json" with { type: "json" };
 
 function buildProviderConfig(): Record<string, unknown> {
   const contextWindows: Record<string, number> = modelsData.contextWindows ?? {};
-  const maxOutputTokens: Record<string, number> = (modelsData as Record<string, unknown>).maxOutputTokens as Record<string, number> ?? {};
-  const modelNames: Record<string, string> = (modelsData as Record<string, unknown>).modelNames as Record<string, string> ?? {};
+  const maxOutputTokens: Record<string, number> =
+    ((modelsData as Record<string, unknown>).maxOutputTokens as Record<string, number>) ?? {};
+  const modelNames: Record<string, string> =
+    ((modelsData as Record<string, unknown>).modelNames as Record<string, string>) ?? {};
   const models: Record<string, { name: string; limit: { context: number; output: number } }> = {};
   for (const id of modelsData.builtin) {
     const key = id.split("/").pop() ?? id;

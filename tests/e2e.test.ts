@@ -148,7 +148,7 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     });
     expect(res.status).toBe(400);
     const body = (await res.json()) as any;
-    expect(body.error).toBe("Invalid JSON body");
+    expect(body.error.message).toBe("Invalid JSON body");
   });
 });
 
@@ -222,5 +222,196 @@ describe("E2E: health and models", () => {
     const res = await fetch(`${baseUrl}/v1/models`, { method: "OPTIONS" });
     expect(res.status).toBe(204);
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
+  });
+});
+
+// ──────────────────────────────────────────
+// E2E: Anthropic /v1/messages
+// ──────────────────────────────────────────
+
+describe("E2E: Anthropic /v1/messages", () => {
+  let server: http.Server;
+  let baseUrl: string;
+  const port = 19005;
+
+  beforeAll(async () => {
+    const config = { ...loadConfig(), port, apiKey: "test-key", host: "127.0.0.1" };
+    server = createServer(config);
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  afterEach(() => {
+    sendToCCSpy.mockReset();
+  });
+
+  it("non-streaming: returns full Anthropic message", async () => {
+    sendToCCSpy.mockResolvedValue({ stream: fakeStream() });
+
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "test-key",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "Hi" }],
+        stream: false,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.type).toBe("message");
+    expect(body.role).toBe("assistant");
+    expect(body.content).toBeInstanceOf(Array);
+    expect(body.content.length).toBeGreaterThan(0);
+    expect(body.content[0].type).toBe("text");
+    expect(body.content[0].text).toBe("Hello world");
+    expect(body.stop_reason).toBe("end_turn");
+    expect(body.usage).toBeDefined();
+    expect(body.usage.input_tokens).toBe(5);
+    expect(body.usage.output_tokens).toBe(10);
+  });
+
+  it("streaming: returns Anthropic SSE events", async () => {
+    sendToCCSpy.mockResolvedValue({ stream: fakeStream() });
+
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "test-key",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "Hi" }],
+        stream: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/event-stream");
+
+    const text = await res.text();
+    expect(text).toContain("event: message_start");
+    expect(text).toContain("event: content_block_start");
+    expect(text).toContain("event: content_block_delta");
+    expect(text).toContain("event: content_block_stop");
+    expect(text).toContain("event: message_delta");
+    expect(text).toContain("event: message_stop");
+  });
+
+  it("returns 400 for invalid JSON body with Anthropic error shape", async () => {
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": "test-key" },
+      body: "not json",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.type).toBe("error");
+    expect(body.error.type).toBe("invalid_request_error");
+  });
+
+  it("returns 400 for missing max_tokens with Anthropic error shape", async () => {
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": "test-key" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [{ role: "user", content: "Hi" }],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as any;
+    expect(body.type).toBe("error");
+    expect(body.error.type).toBe("invalid_request_error");
+  });
+});
+
+// ──────────────────────────────────────────
+// E2E: Anthropic /v1/messages/count_tokens
+// ──────────────────────────────────────────
+
+describe("E2E: Anthropic /v1/messages/count_tokens", () => {
+  let server: http.Server;
+  let baseUrl: string;
+  const port = 19006;
+
+  beforeAll(async () => {
+    const config = { ...loadConfig(), port, apiKey: "test-key", host: "127.0.0.1" };
+    server = createServer(config);
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  it("returns estimated input_tokens", async () => {
+    const res = await fetch(`${baseUrl}/v1/messages/count_tokens`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-api-key": "test-key" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        messages: [{ role: "user", content: "Hello World!" }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.input_tokens).toBeDefined();
+    expect(typeof body.input_tokens).toBe("number");
+    expect(body.input_tokens).toBeGreaterThan(0);
+  });
+});
+
+// ──────────────────────────────────────────
+// E2E: /v1/models with anthropic-version header
+// ──────────────────────────────────────────
+
+describe("E2E: /v1/models Anthropic shape", () => {
+  let server: http.Server;
+  let baseUrl: string;
+  const port = 19007;
+
+  beforeAll(async () => {
+    const config = { ...loadConfig(), port, apiKey: null, host: "127.0.0.1" };
+    server = createServer(config);
+    await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", () => resolve()));
+    baseUrl = `http://127.0.0.1:${port}`;
+  });
+
+  afterAll(() => new Promise<void>((resolve) => server.close(() => resolve())));
+
+  it("returns Anthropic model shape with anthropic-version header", async () => {
+    const res = await fetch(`${baseUrl}/v1/models`, {
+      headers: { "anthropic-version": "2023-06-01" },
+    });
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.data).toBeInstanceOf(Array);
+    expect(body.data.length).toBeGreaterThan(0);
+    expect(body.data[0].type).toBe("model");
+    expect(body.data[0]).toHaveProperty("display_name");
+    expect(body.data[0]).toHaveProperty("created_at");
+    expect(body).toHaveProperty("has_more");
+    expect(body).toHaveProperty("first_id");
+    expect(body).toHaveProperty("last_id");
+  });
+
+  it("returns OpenAI model shape without anthropic-version header", async () => {
+    const res = await fetch(`${baseUrl}/v1/models`);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    expect(body.object).toBe("list");
+    expect(body.data[0].object).toBe("model");
   });
 });

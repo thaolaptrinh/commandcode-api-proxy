@@ -1,20 +1,4 @@
-import crypto from "node:crypto";
 import type { CCMessage, CCRequestBody, UsageData } from "@/translate/types.js";
-
-// ──────────────────────────────────────────
-// Message ID
-// ──────────────────────────────────────────
-
-// One id per downstream request, shared by the OpenAI encoders.
-let _messageId = crypto.randomUUID();
-
-export function getMessageId(): string {
-  return _messageId;
-}
-
-export function resetMessageId(): void {
-  _messageId = crypto.randomUUID();
-}
 
 // ──────────────────────────────────────────
 // Usage extraction
@@ -84,6 +68,46 @@ export function buildCCConfig(
     recentCommits: [],
     ...overrides,
   };
+}
+
+// ──────────────────────────────────────────
+// No-tools safeguard
+// ──────────────────────────────────────────
+
+export function applyNoToolsSafeguard(
+  body: CCRequestBody,
+  ccMessages: CCMessage[],
+  hasTools: boolean,
+): void {
+  if (hasTools) return;
+
+  const noToolsInstruction =
+    "CRITICAL: You are running in a chat-only environment. Tool execution is disabled. Do not generate or call any tools (e.g. Build, ReadFile, grep, Search, etc.). Respond only with plain text.";
+
+  const existingSystem = body.params.system;
+  body.params.system = existingSystem
+    ? `${existingSystem}\n\n${noToolsInstruction}`
+    : noToolsInstruction;
+
+  if (ccMessages.length === 0) return;
+  for (let i = ccMessages.length - 1; i >= 0; i--) {
+    if (ccMessages[i].role === "user") {
+      const msg = ccMessages[i];
+      const suffix =
+        "\n\n[System Note: Tool execution is disabled in this environment. Do not output any tool calls (such as Build, Search, ReadFile, grep, etc.). You must answer directly in plain text.]";
+      if (typeof msg.content === "string") {
+        msg.content += suffix;
+      } else if (Array.isArray(msg.content)) {
+        const lastTextPart = [...msg.content].reverse().find((p) => p.type === "text");
+        if (lastTextPart) {
+          lastTextPart.text = (lastTextPart.text ?? "") + suffix;
+        } else {
+          msg.content.push({ type: "text", text: suffix });
+        }
+      }
+      break;
+    }
+  }
 }
 
 // ──────────────────────────────────────────

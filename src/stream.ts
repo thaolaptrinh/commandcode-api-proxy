@@ -106,3 +106,10 @@ export function formatSSE(data: object): string {
 export function formatSSEDone(): string {
   return "data: [DONE]\n\n";
 }
+
+export function formatAnthropicSSE(eventType: string, data: unknown): string {
+  if (eventType === "message_stop") {
+    return "event: message_stop\ndata: {}\n\n";
+  }
+  return `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
+}
