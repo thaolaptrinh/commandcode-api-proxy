@@ -1,4 +1,9 @@
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
 import { readAuthKey } from "@/auth.js";
+import type { AnthropicModelConfig } from "@/translate/anthropic-models.js";
+import { logger } from "@/logger.js";
 
 interface CliArgs {
   host?: string;
@@ -83,4 +88,18 @@ export function loadConfig(): Config {
   const logLevel = process.env.LOG_LEVEL || "info";
 
   return { host, port, apiKey, ccApiBase, ccVersion, logLevel };
+}
+
+export function loadAnthropicModelConfig(): AnthropicModelConfig | null {
+  const home = os.homedir();
+  const filePath = path.join(home, ".config", "commandcode-api-proxy", "anthropic-models.json");
+  try {
+    const raw = fs.readFileSync(filePath, "utf-8");
+    return JSON.parse(raw) as AnthropicModelConfig;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      logger.warn(`Failed to load anthropic-models.json: ${(err as Error).message}`);
+    }
+    return null;
+  }
 }
