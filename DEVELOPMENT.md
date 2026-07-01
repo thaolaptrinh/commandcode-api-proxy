@@ -46,7 +46,8 @@ src/
 ├── stream.ts             # NDJSON parser & SSE formatter
 ├── upstream.ts           # CC API client
 ├── setup/
-│   └── opencode.ts       # opencode.json bootstrap helper
+│   ├── opencode.ts       # opencode.json bootstrap helper
+│   └── claude-code.ts    # claude-code config + model mapping setup
 ├── translate/
 │   ├── types.ts          # Shared types (OpenAI, CC, UsageData)
 │   ├── models.ts         # Model resolution & aliasing

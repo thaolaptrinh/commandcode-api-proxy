@@ -56,12 +56,13 @@ Get your API key from https://commandcode.ai/settings.
 
 ### CLI options
 
-| Option             | Description                       | Default     |
-| ------------------ | --------------------------------- | ----------- |
-| `--host`           | Bind address                      | `127.0.0.1` |
-| `--port`           | Port                              | `8787`      |
-| `--api-key`        | Command Code API key              | —           |
-| `--setup-opencode` | Generate OpenCode provider config | —           |
+| Option                | Description                       | Default     |
+| --------------------- | --------------------------------- | ----------- |
+| `--host`              | Bind address                      | `127.0.0.1` |
+| `--port`              | Port                              | `8787`      |
+| `--api-key`           | Command Code API key              | —           |
+| `--setup-opencode`    | Generate OpenCode provider config | —           |
+| `--setup-claude-code` | Generate Claude Code model config | —           |
 
 ## Endpoints
 
@@ -106,18 +107,33 @@ curl http://127.0.0.1:8787/v1/messages/count_tokens \
 ### Anthropic model mapping
 
 Anthropic clients send Claude model IDs (e.g., `claude-sonnet-4-5-20250929`).
-Map them to CC models via environment variables:
+The proxy maps them to CC models via a config file with glob wildcards:
 
 ```bash
-ANTHROPIC_DEFAULT_MODEL=deepseek/deepseek-v4-pro          # fallback for any unmapped Claude ID
-ANTHROPIC_MODEL_CLAUDE_SONNET_4_5=glm-5.1                  # map a specific Claude variant
-ANTHROPIC_MODEL_CLAUDE_OPUS_4_1=deepseek/deepseek-v4-pro
-ANTHROPIC_MODEL_CLAUDE_HAIKU=deepseek/deepseek-v4-flash
+npx commandcode-api-proxy --setup-claude-code
 ```
 
-The proxy normalizes Claude IDs to env-var keys:
-`claude-sonnet-4-5-20250929` → `CLAUDE_SONNET_4_5`. Non-Claude model IDs
-pass through unchanged.
+This writes `~/.config/commandcode-api-proxy/anthropic-models.json`:
+
+```json
+{
+  "default": "deepseek/deepseek-v4-pro",
+  "mappings": {
+    "claude-sonnet-*": "deepseek/deepseek-v4-pro",
+    "claude-opus-*": "deepseek/deepseek-v4-pro",
+    "claude-haiku-*": "deepseek/deepseek-v4-flash"
+  }
+}
+```
+
+**Glob matching:** `*` matches any characters. First matching pattern wins —
+put specific patterns before general ones (e.g. `claude-sonnet-*` before
+`claude-*`). Edit the file to customize mappings, then restart the proxy.
+
+Non-Claude model IDs pass through unchanged.
+
+**Optional override:** Set `ANTHROPIC_DEFAULT_MODEL` env var to override the
+config file's `default` field without editing the file.
 
 ### Anthropic limitations
 
