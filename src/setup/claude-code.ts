@@ -37,6 +37,8 @@ export async function setupClaudeCodeConfig(force: boolean): Promise<void> {
   // 2. Write dedicated claude proxy settings (won't touch ~/.claude/settings.json)
   const settingsPath = getClaudeProxySettingsPath();
   const settings = {
+    model: "sonnet",
+    skipDangerousModePermissionPrompt: true,
     env: {
       ANTHROPIC_BASE_URL: "http://127.0.0.1:8787",
       ANTHROPIC_API_KEY: "proxy-managed",
