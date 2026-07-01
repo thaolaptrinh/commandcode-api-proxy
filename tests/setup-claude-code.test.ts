@@ -4,21 +4,17 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-function proxySettingsPath(): string {
+function settingsPath(): string {
   return path.join(os.homedir(), ".config", "commandcode-api-proxy", "claude-settings.json");
 }
 
-function modelConfigPath(): string {
-  return path.join(os.homedir(), ".config", "commandcode-api-proxy", "anthropic-models.json");
-}
-
 describe("setupClaudeCodeConfig", () => {
-  let snapshot: Record<string, unknown>;
+  let originalFs: Record<string, unknown>;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-  let writtenFiles: Map<string, string>;
+  let written: string | null = null;
 
   function saveFs(): void {
-    snapshot = {
+    originalFs = {
       existsSync: fs.existsSync,
       mkdirSync: fs.mkdirSync,
       writeFileSync: fs.writeFileSync,
@@ -26,28 +22,26 @@ describe("setupClaudeCodeConfig", () => {
   }
 
   function restoreFs(): void {
-    fs.existsSync = snapshot.existsSync as typeof fs.existsSync;
-    fs.mkdirSync = snapshot.mkdirSync as typeof fs.mkdirSync;
-    fs.writeFileSync = snapshot.writeFileSync as typeof fs.writeFileSync;
+    fs.existsSync = originalFs.existsSync as typeof fs.existsSync;
+    fs.mkdirSync = originalFs.mkdirSync as typeof fs.mkdirSync;
+    fs.writeFileSync = originalFs.writeFileSync as typeof fs.writeFileSync;
   }
 
   beforeEach(() => {
-    writtenFiles = new Map();
+    written = null;
     consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     saveFs();
 
     fs.existsSync = ((p: fs.PathLike) => {
-      const s = p.toString();
-      if (s === modelConfigPath()) return false;
-      if (s === proxySettingsPath()) return false;
+      if (p.toString() === settingsPath()) return false;
       return true;
     }) as typeof fs.existsSync;
 
-    fs.writeFileSync = ((p: fs.PathLike, data: string) => {
-      writtenFiles.set(p.toString(), data);
-    }) as typeof fs.writeFileSync;
-
     fs.mkdirSync = (() => undefined) as typeof fs.mkdirSync;
+
+    fs.writeFileSync = ((p: fs.PathLike, data: string) => {
+      if (p.toString() === settingsPath()) written = data;
+    }) as typeof fs.writeFileSync;
   });
 
   afterEach(() => {
@@ -55,51 +49,37 @@ describe("setupClaudeCodeConfig", () => {
     consoleLogSpy.mockRestore();
   });
 
-  test("creates model config file with defaults", async () => {
+  test("creates settings file with env vars", async () => {
     await setupClaudeCodeConfig(false);
-    const raw = writtenFiles.get(modelConfigPath());
-    expect(raw).toBeTruthy();
-    const parsed = JSON.parse(raw!);
-    expect(parsed.default).toBe("deepseek/deepseek-v4-pro");
-    expect(parsed.mappings["claude-sonnet-*"]).toBeDefined();
-  });
-
-  test("creates proxy settings file with env vars", async () => {
-    await setupClaudeCodeConfig(false);
-    const raw = writtenFiles.get(proxySettingsPath());
-    expect(raw).toBeTruthy();
-    const parsed = JSON.parse(raw!);
+    expect(written).toBeTruthy();
+    const parsed = JSON.parse(written!);
     expect(parsed.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8787");
     expect(parsed.env.ANTHROPIC_API_KEY).toBe("proxy-managed");
+    expect(parsed.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe("deepseek/deepseek-v4-pro");
+    expect(parsed.env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe("deepseek/deepseek-v4-pro");
+    expect(parsed.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe("deepseek/deepseek-v4-flash");
   });
 
-  test("does not overwrite existing config without --force", async () => {
-    writtenFiles.set(modelConfigPath(), JSON.stringify({ default: "old" }));
+  test("does not overwrite existing without --force", async () => {
     fs.existsSync = (() => true) as typeof fs.existsSync;
 
     await setupClaudeCodeConfig(false);
-
+    expect(written).toBeNull();
     const output = consoleLogSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("already exists");
-    expect(writtenFiles.has(proxySettingsPath())).toBe(false);
   });
 
-  test("existing config with --force overwrites", async () => {
-    writtenFiles.set(modelConfigPath(), JSON.stringify({ default: "old" }));
+  test("existing with --force overwrites", async () => {
     fs.existsSync = (() => true) as typeof fs.existsSync;
 
     await setupClaudeCodeConfig(true);
-
-    const parsed = JSON.parse(writtenFiles.get(modelConfigPath())!);
-    expect(parsed.default).toBe("deepseek/deepseek-v4-pro");
-    expect(writtenFiles.has(proxySettingsPath())).toBe(true);
+    expect(written).toBeTruthy();
   });
 
   test("prints claude --settings instruction", async () => {
     await setupClaudeCodeConfig(false);
     const output = consoleLogSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("claude --settings");
-    expect(output).toContain(proxySettingsPath());
-    expect(output).toContain("alias");
+    expect(output).toContain(settingsPath());
   });
 });
