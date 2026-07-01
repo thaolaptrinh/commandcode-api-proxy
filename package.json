@@ -1,6 +1,6 @@
 {
   "name": "commandcode-api-proxy",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "OpenAI-compatible API proxy for Command Code. Use your Command Code subscription from any OpenAI client.",
   "keywords": [
     "ai-proxy",
