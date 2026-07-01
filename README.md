@@ -240,11 +240,28 @@ response = client.chat.completions.create(
 
 ### Claude Code
 
-Set the base URL and API key in your environment:
+Run the proxy's setup to generate model config and Claude Code settings:
 
 ```bash
-export ANTHROPIC_BASE_URL=http://127.0.0.1:8787
-export ANTHROPIC_API_KEY=proxy-managed
+npx commandcode-api-proxy --setup-claude-code
+```
+
+This creates:
+
+1. Model mapping config at `~/.config/commandcode-api-proxy/anthropic-models.json`
+2. Claude Code settings at `~/.config/commandcode-api-proxy/claude-settings.json`
+
+Then run:
+
+```bash
+claude --settings ~/.config/commandcode-api-proxy/claude-settings.json
+```
+
+Or set an alias:
+
+```bash
+alias claude-proxy="claude --settings ~/.config/commandcode-api-proxy/claude-settings.json"
+claude-proxy
 ```
 
 ### Anthropic SDK (Python)

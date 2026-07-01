@@ -4,26 +4,24 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-function getConfigPath(): string {
+function proxySettingsPath(): string {
+  return path.join(os.homedir(), ".config", "commandcode-api-proxy", "claude-settings.json");
+}
+
+function modelConfigPath(): string {
   return path.join(os.homedir(), ".config", "commandcode-api-proxy", "anthropic-models.json");
 }
 
 describe("setupClaudeCodeConfig", () => {
   let snapshot: Record<string, unknown>;
   let consoleLogSpy: ReturnType<typeof vi.spyOn>;
-  let writtenPath: string | null = null;
-  let writtenContent: string | null = null;
-  let appendedPath: string | null = null;
-  let appendedContent: string | null = null;
-  let rcContent: string = "";
+  let writtenFiles: Map<string, string>;
 
   function saveFs(): void {
     snapshot = {
-      existsSync: fs.existsSync as unknown as Record<string, unknown>,
+      existsSync: fs.existsSync,
       mkdirSync: fs.mkdirSync,
       writeFileSync: fs.writeFileSync,
-      appendFileSync: fs.appendFileSync,
-      readFileSync: fs.readFileSync,
     };
   }
 
@@ -31,102 +29,77 @@ describe("setupClaudeCodeConfig", () => {
     fs.existsSync = snapshot.existsSync as typeof fs.existsSync;
     fs.mkdirSync = snapshot.mkdirSync as typeof fs.mkdirSync;
     fs.writeFileSync = snapshot.writeFileSync as typeof fs.writeFileSync;
-    fs.appendFileSync = snapshot.appendFileSync as typeof fs.appendFileSync;
-    fs.readFileSync = snapshot.readFileSync as typeof fs.readFileSync;
   }
 
   beforeEach(() => {
-    writtenPath = null;
-    writtenContent = null;
-    appendedPath = null;
-    appendedContent = null;
-    rcContent = "";
-    process.env.SHELL = "/usr/bin/zsh";
+    writtenFiles = new Map();
     consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     saveFs();
 
     fs.existsSync = ((p: fs.PathLike) => {
-      if (p === getConfigPath()) return false;
+      const s = p.toString();
+      if (s === modelConfigPath()) return false;
+      if (s === proxySettingsPath()) return false;
       return true;
     }) as typeof fs.existsSync;
-    fs.mkdirSync = (() => undefined) as typeof fs.mkdirSync;
+
     fs.writeFileSync = ((p: fs.PathLike, data: string) => {
-      if (p === getConfigPath()) {
-        writtenPath = p as string;
-        writtenContent = data;
-      }
+      writtenFiles.set(p.toString(), data);
     }) as typeof fs.writeFileSync;
-    fs.appendFileSync = ((p: fs.PathLike, data: string) => {
-      appendedPath = p as string;
-      appendedContent = data;
-    }) as typeof fs.appendFileSync;
-    fs.readFileSync = (() => "") as typeof fs.readFileSync;
+
+    fs.mkdirSync = (() => undefined) as typeof fs.mkdirSync;
   });
 
   afterEach(() => {
     restoreFs();
     consoleLogSpy.mockRestore();
-    delete process.env.SHELL;
   });
 
-  test("creates config file with defaults", async () => {
+  test("creates model config file with defaults", async () => {
     await setupClaudeCodeConfig(false);
-    expect(writtenPath).toBe(getConfigPath());
-    const parsed = JSON.parse(writtenContent!);
-    expect(parsed.default).toBeDefined();
+    const raw = writtenFiles.get(modelConfigPath());
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.default).toBe("deepseek/deepseek-v4-pro");
     expect(parsed.mappings["claude-sonnet-*"]).toBeDefined();
   });
 
-  test("appends proxy env vars to zshrc", async () => {
-    process.env.SHELL = "/usr/bin/zsh";
+  test("creates proxy settings file with env vars", async () => {
     await setupClaudeCodeConfig(false);
-    expect(appendedPath).toContain(".zshrc");
-    expect(appendedContent).toContain("ANTHROPIC_BASE_URL");
-    expect(appendedContent).toContain("ANTHROPIC_API_KEY");
-    expect(appendedContent).toContain("proxy-managed");
+    const raw = writtenFiles.get(proxySettingsPath());
+    expect(raw).toBeTruthy();
+    const parsed = JSON.parse(raw!);
+    expect(parsed.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:8787");
+    expect(parsed.env.ANTHROPIC_API_KEY).toBe("proxy-managed");
   });
 
-  test("appends to bashrc for bash", async () => {
-    process.env.SHELL = "/usr/bin/bash";
-    await setupClaudeCodeConfig(false);
-    expect(appendedPath).toContain(".bashrc");
-    expect(appendedContent).toContain("export ANTHROPIC");
-  });
+  test("does not overwrite existing config without --force", async () => {
+    writtenFiles.set(modelConfigPath(), JSON.stringify({ default: "old" }));
+    fs.existsSync = (() => true) as typeof fs.existsSync;
 
-  test("uses fish syntax for fish shell", async () => {
-    process.env.SHELL = "/usr/bin/fish";
     await setupClaudeCodeConfig(false);
-    expect(appendedContent).toContain("set -gx ANTHROPIC");
-  });
 
-  test("does not duplicate ANTHROPIC_BASE_URL", async () => {
-    fs.readFileSync = (() =>
-      'export ANTHROPIC_BASE_URL="http://localhost:8787"') as typeof fs.readFileSync;
-    await setupClaudeCodeConfig(false);
-    expect(appendedContent).toContain("ANTHROPIC_API_KEY");
-    expect(appendedContent).not.toContain("ANTHROPIC_BASE_URL");
-  });
-
-  test("does not append if both vars already in RC", async () => {
-    fs.readFileSync = (() =>
-      'export ANTHROPIC_BASE_URL="http://localhost:8787"\nexport ANTHROPIC_API_KEY="x"') as typeof fs.readFileSync;
-    await setupClaudeCodeConfig(false);
-    expect(appendedPath).toBeNull();
-  });
-
-  test("existing file without force warns", async () => {
-    fs.existsSync = ((p: fs.PathLike) => true) as typeof fs.existsSync;
-    await setupClaudeCodeConfig(false);
-    expect(writtenPath).toBeNull();
-    expect(appendedPath).toBeNull();
     const output = consoleLogSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     expect(output).toContain("already exists");
+    expect(writtenFiles.has(proxySettingsPath())).toBe(false);
   });
 
-  test("existing file with force overwrites", async () => {
-    fs.existsSync = ((p: fs.PathLike) => true) as typeof fs.existsSync;
+  test("existing config with --force overwrites", async () => {
+    writtenFiles.set(modelConfigPath(), JSON.stringify({ default: "old" }));
+    fs.existsSync = (() => true) as typeof fs.existsSync;
+
     await setupClaudeCodeConfig(true);
-    expect(writtenPath).toBe(getConfigPath());
-    expect(appendedPath).toBeTruthy();
+
+    const parsed = JSON.parse(writtenFiles.get(modelConfigPath())!);
+    expect(parsed.default).toBe("deepseek/deepseek-v4-pro");
+    expect(writtenFiles.has(proxySettingsPath())).toBe(true);
+  });
+
+  test("prints claude --settings instruction", async () => {
+    await setupClaudeCodeConfig(false);
+    const output = consoleLogSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    expect(output).toContain("claude --settings");
+    expect(output).toContain(proxySettingsPath());
+    expect(output).toContain("alias");
   });
 });
