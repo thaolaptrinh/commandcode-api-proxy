@@ -1,11 +1,12 @@
+<a href="#"><img src="./.github/assets/banner.webp" alt="Banner"></a>
+
 # Command Code API Proxy
 
-**OpenAI-compatible API proxy for [Command Code](https://commandcode.ai).**
-Use your Command Code subscription from **any** OpenAI-compatible client — OpenCode, Continue, the OpenAI SDK, or plain `curl`.
+[![npm version](https://img.shields.io/npm/v/commandcode-api-proxy)](https://www.npmjs.com/package/commandcode-api-proxy)
+[![downloads/month](https://img.shields.io/npm/dm/commandcode-api-proxy)](https://www.npmjs.com/package/commandcode-api-proxy)
 
-```
-npx commandcode-api-proxy
-```
+**OpenAI-compatible API proxy for [Command Code](https://commandcode.ai).**
+Use your Command Code subscription from **any** OpenAI-compatible client — OpenCode, Claude Code, or plain `curl`.
 
 ## Why?
 
@@ -18,10 +19,16 @@ Command Code exposes two API surfaces:
 
 This proxy talks `/alpha/generate` upstream and standard OpenAI downstream — so your existing plan works from any tool.
 
-## Quick start
+## Run the proxy
 
 ```bash
-# Run directly (no install)
+# Clone & run from source
+git clone https://github.com/thaolaptrinh/commandcode-api-proxy.git
+cd commandcode-api-proxy
+npm install
+npm run build && npm start
+
+# Or run directly (no install)
 npx commandcode-api-proxy
 
 # Or install globally
@@ -29,17 +36,19 @@ npm install -g commandcode-api-proxy
 commandcode-api-proxy
 ```
 
-### Authentication
+On first run, the proxy prompts for your Command Code API key (get it from
+https://commandcode.ai/settings). Other ways to provide it are in
+[Authentication](#authentication).
 
-The proxy loads your API key from (in order of priority):
+## Authentication
 
-1. `--api-key` CLI flag: `npx commandcode-api-proxy --api-key user_xxx`
-2. `CC_API_KEY` environment variable
-3. `~/.config/commandcode-api-proxy/auth.json` (saved via `auth login`)
+Provide your API key via `--api-key`, the `CC_API_KEY` env var, or save it
+with `auth login` (stored at `~/.config/commandcode-api-proxy/auth.json`).
 
-On first run without a key, the proxy prompts you to enter one and persists it.
+### CLI auth commands
 
-#### CLI auth commands
+> From source, replace `commandcode-api-proxy` with `npm run auth --`
+> (e.g. `npm run auth -- login`).
 
 ```bash
 # Save a new API key
@@ -52,9 +61,7 @@ commandcode-api-proxy auth login --force
 commandcode-api-proxy auth logout
 ```
 
-Get your API key from https://commandcode.ai/settings.
-
-### CLI options
+## CLI options
 
 | Option                | Description                       | Default     |
 | --------------------- | --------------------------------- | ----------- |
@@ -64,97 +71,44 @@ Get your API key from https://commandcode.ai/settings.
 | `--setup-opencode`    | Generate OpenCode provider config | —           |
 | `--setup-claude-code` | Generate Claude Code model config | —           |
 
+Equivalent env vars (lower priority than CLI flags):
+
+| Env var          | Description                                  |
+| ---------------- | -------------------------------------------- |
+| `HOST`           | Bind address                                 |
+| `PORT`           | Port                                         |
+| `CC_API_KEY`     | Command Code API key                         |
+| `CC_API_BASE`    | Upstream API base URL                        |
+| `CC_CLI_VERSION` | CLI version sent upstream                    |
+| `LOG_LEVEL`      | Log level (`info`, `debug`, etc.)            |
+
 ## Endpoints
 
-### `POST /v1/chat/completions` (OpenAI)
+| Endpoint                         | Protocol  |
+| -------------------------------- | --------- |
+| `GET /health`                    | —         |
+| `GET /v1/models`                 | OpenAI    |
+| `POST /v1/chat/completions`      | OpenAI    |
+| `POST /v1/messages`              | Anthropic |
+| `POST /v1/messages/count_tokens` | Anthropic |
 
-```bash
-curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Authorization: Bearer proxy-managed" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "deepseek/deepseek-v4-pro",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": true
-  }'
-```
-
-### `POST /v1/messages` (Anthropic)
-
-```bash
-curl http://127.0.0.1:8787/v1/messages \
-  -H "x-api-key: proxy-managed" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "claude-sonnet-4-5-20250929",
-    "max_tokens": 4096,
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": true
-  }'
-```
-
-### `POST /v1/messages/count_tokens` (Anthropic)
-
-```bash
-curl http://127.0.0.1:8787/v1/messages/count_tokens \
-  -H "x-api-key: proxy-managed" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
-```
-
-### Anthropic model mapping
-
-Anthropic clients send Claude model IDs (e.g., `claude-sonnet-4-5-20250929`).
-The proxy maps them to CC models via a config file with glob wildcards:
-
-```bash
-npx commandcode-api-proxy --setup-claude-code
-```
-
-This writes `~/.config/commandcode-api-proxy/anthropic-models.json`:
-
-```json
-{
-  "default": "deepseek/deepseek-v4-pro",
-  "mappings": {
-    "claude-sonnet-*": "deepseek/deepseek-v4-pro",
-    "claude-opus-*": "deepseek/deepseek-v4-pro",
-    "claude-haiku-*": "deepseek/deepseek-v4-flash"
-  }
-}
-```
-
-**Glob matching:** `*` matches any characters. First matching pattern wins —
-put specific patterns before general ones (e.g. `claude-sonnet-*` before
-`claude-*`). Edit the file to customize mappings, then restart the proxy.
-
-Non-Claude model IDs pass through unchanged.
-
-**Optional override:** Set `ANTHROPIC_DEFAULT_MODEL` env var to override the
-config file's `default` field without editing the file.
-
-### Anthropic limitations
-
-- **Thinking signatures**: placeholder only (not cryptographically signed).
-- **Cache control**: stripped (no CC analogue).
-- **Count tokens**: heuristic estimate, not exact.
-- **Built-in/server tools** (`computer_`, `bash_`, `web_search_`, etc.):
-  rejected with `invalid_request_error`. Only custom tools supported.
-- **`metadata`, `top_k`, `top_p`, `service_tier`**: accepted but dropped.
+All endpoints accept any auth token (use `proxy-managed`) — the proxy injects
+your real Command Code key upstream.
 
 ## Client configuration
 
 ### OpenCode
 
-Run setup (writes to `~/.config/opencode/opencode.json`):
+Run setup to auto-generate the provider config at `~/.config/opencode/opencode.json`:
 
 ```bash
 npx commandcode-api-proxy --setup-opencode
 ```
 
-Or add manually:
+All CC models are listed directly — pick the one you want from the model selector.
+
+Or add a `commandcode` provider manually — point `baseURL` at the proxy and
+use any model ID from the [Model aliases](#model-aliases) table:
 
 ```json
 {
@@ -168,90 +122,33 @@ Or add manually:
         "apiKey": "proxy-managed"
       },
       "models": {
-        "deepseek-v4-pro": {
-          "name": "DeepSeek V4 Pro",
-          "limit": { "context": 1048576, "output": 393216 }
-        },
-        "deepseek-v4-flash": {
-          "name": "DeepSeek V4 Flash",
-          "limit": { "context": 1048576, "output": 393216 }
-        },
-        "MiniMax-M2.7": { "name": "MiniMax M2.7", "limit": { "context": 204800, "output": 32768 } },
-        "MiniMax-M2.5": { "name": "MiniMax M2.5", "limit": { "context": 204800, "output": 32768 } },
-        "GLM-5.1": { "name": "GLM-5.1", "limit": { "context": 200000, "output": 131072 } },
-        "GLM-5": { "name": "GLM-5", "limit": { "context": 200000, "output": 131072 } },
-        "Kimi-K2.6": { "name": "Kimi K2.6", "limit": { "context": 262144, "output": 98304 } },
-        "Kimi-K2.5": { "name": "Kimi K2.5", "limit": { "context": 262144, "output": 98304 } },
-        "Qwen3.6-Max-Preview": {
-          "name": "Qwen 3.6 Max Preview",
-          "limit": { "context": 262144, "output": 65536 }
-        },
-        "Qwen3.6-Plus": {
-          "name": "Qwen 3.6 Plus",
-          "limit": { "context": 1048576, "output": 65536 }
-        },
-        "Qwen3.7-Max": { "name": "Qwen 3.7 Max", "limit": { "context": 1048576, "output": 65536 } },
-        "Qwen3.7-Plus": {
-          "name": "Qwen 3.7 Plus",
-          "limit": { "context": 1048576, "output": 65536 }
-        },
-        "Step-3.5-Flash": {
-          "name": "Step 3.5 Flash",
-          "limit": { "context": 262144, "output": 65536 }
-        },
-        "mimo-v2.5": { "name": "MiMo V2.5", "limit": { "context": 1048576, "output": 131072 } }
+        "deepseek-v4-pro": { "name": "DeepSeek V4 Pro" }
       }
     }
   }
 }
 ```
 
-### OpenAI Python SDK
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://127.0.0.1:8787/v1",
-    api_key="proxy-managed",
-)
-
-response = client.chat.completions.create(
-    model="deepseek/deepseek-v4-pro",
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-```
-
-### Continue
-
-```json
-{
-  "models": [
-    {
-      "title": "Command Code",
-      "provider": "openai",
-      "model": "deepseek/deepseek-v4-pro",
-      "apiKey": "proxy-managed",
-      "apiBase": "http://127.0.0.1:8787/v1"
-    }
-  ]
-}
-```
-
 ### Claude Code
 
-Run the proxy's setup to generate model config and Claude Code settings:
+Claude Code only offers three tiers — `sonnet`, `opus`, `haiku`. The setup
+maps each tier to a Command Code model via env vars in `claude-settings.json`:
 
 ```bash
 npx commandcode-api-proxy --setup-claude-code
 ```
 
-This creates:
+If a settings file already exists, re-run with `--force` to overwrite it.
 
-1. Model mapping config at `~/.config/commandcode-api-proxy/anthropic-models.json`
-2. Claude Code settings at `~/.config/commandcode-api-proxy/claude-settings.json`
+| Claude Code tier | Env var                          | Maps to                     |
+| ---------------- | -------------------------------- | --------------------------- |
+| `sonnet`         | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `deepseek/deepseek-v4-pro`  |
+| `opus`           | `ANTHROPIC_DEFAULT_OPUS_MODEL`   | `deepseek/deepseek-v4-pro`  |
+| `haiku`          | `ANTHROPIC_DEFAULT_HAIKU_MODEL`  | `deepseek/deepseek-v4-flash`|
 
-Then run:
+Edit those env vars in the settings file to point at other CC models. To force
+every `claude-*` request to a single model regardless of tier, set
+`ANTHROPIC_DEFAULT_MODEL`. Then run:
 
 ```bash
 claude --settings ~/.config/commandcode-api-proxy/claude-settings.json
@@ -264,37 +161,26 @@ alias claude-proxy="claude --settings ~/.config/commandcode-api-proxy/claude-set
 claude-proxy
 ```
 
-### Anthropic SDK (Python)
-
-```python
-from anthropic import Anthropic
-
-client = Anthropic(
-    base_url="http://127.0.0.1:8787/v1",
-    api_key="proxy-managed",
-)
-
-message = client.messages.create(
-    model="claude-sonnet-4-5-20250929",
-    max_tokens=4096,
-    messages=[{"role": "user", "content": "Hello!"}],
-)
-```
-
 ## Model aliases
 
 Short names work in addition to full model IDs:
 
-| Alias                                 | Maps to                      |
-| ------------------------------------- | ---------------------------- |
-| `deepseek-v4-pro`, `deepseek-v4`      | `deepseek/deepseek-v4-pro`   |
-| `deepseek-v4-flash`, `deepseek-flash` | `deepseek/deepseek-v4-flash` |
-| `minimax-m2.7`, `minimax-m2.5`        | `MiniMaxAI/MiniMax-*`        |
-| `glm-5.1`, `glm-5`                    | `zai-org/GLM-*`              |
-| `kimi-k2.6`, `kimi-k2.5`              | `moonshotai/Kimi-*`          |
-| `qwen3.6-max`, `qwen3.6-plus`         | `Qwen/Qwen3.6-*`             |
-| `step3.5`                             | `stepfun/Step-3.5-Flash`     |
-| `mimo-v2.5`                           | `xiaomi/mimo-v2.5`           |
+| Alias                                              | Maps to                        |
+| -------------------------------------------------- | ------------------------------ |
+| `deepseek-v4-pro`, `deepseek-v4`, `deepseek-pro`   | `deepseek/deepseek-v4-pro`     |
+| `deepseek-v4-flash`, `deepseek-flash`              | `deepseek/deepseek-v4-flash`   |
+| `kimi-k2.6`, `kimi2.6`                             | `moonshotai/Kimi-K2.6`         |
+| `kimi-k2.5`, `kimi2.5`                             | `moonshotai/Kimi-K2.5`         |
+| `glm-5.1`                                          | `zai-org/GLM-5.1`              |
+| `glm-5`                                            | `zai-org/GLM-5`                |
+| `minimax-m2.7`, `minimax2.7`                       | `MiniMaxAI/MiniMax-M2.7`       |
+| `minimax-m2.5`, `minimax2.5`                       | `MiniMaxAI/MiniMax-M2.5`       |
+| `qwen3.6-max`, `qwen-3.6-max`                      | `Qwen/Qwen3.6-Max-Preview`     |
+| `qwen3.6-plus`, `qwen-3.6-plus`                    | `Qwen/Qwen3.6-Plus`            |
+| `qwen3.7-max`, `qwen-3.7-max`                      | `Qwen/Qwen3.7-Max`             |
+| `qwen3.7-plus`, `qwen-3.7-plus`                    | `Qwen/Qwen3.7-Plus`            |
+| `step3.5`, `step-3.5-flash`                        | `stepfun/Step-3.5-Flash`       |
+| `mimo-v2.5`, `mimo2.5`                             | `xiaomi/mimo-v2.5`             |
 
 Any model ID is passed through as-is — the proxy does not validate against a fixed list.
 
