@@ -12,13 +12,15 @@ import type {
   ContentBlockStartShape,
   DeltaShape,
 } from "@/translate/anthropic-types.js";
-import type { CCMessage, CCContentPart, CCRequestBody, CCEvent } from "@/translate/types.js";
+import type {
+  CCMessage,
+  CCContentPart,
+  CCRequestBody,
+  CCToolChoice,
+  CCEvent,
+} from "@/translate/types.js";
 import { resolveAnthropicModel } from "@/translate/anthropic-models.js";
-import {
-  extractUsage,
-  pruneDanglingTools,
-  buildCCConfig,
-} from "@/translate/util.js";
+import { extractUsage, pruneDanglingTools, buildCCConfig } from "@/translate/util.js";
 import { logger } from "@/logger.js";
 
 // ── Constants ──
@@ -138,10 +140,7 @@ function toCCMessages(messages: AnthropicRequest["messages"]): {
 
   return {
     ccMessages: pruneDanglingTools(ccMessages),
-    systemPrompt:
-      systemParts.length > 0
-        ? systemParts.join("\n\n")
-        : undefined,
+    systemPrompt: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
   };
 }
 
@@ -164,13 +163,16 @@ function resolveReasoningEffort(thinking: AnthropicRequest["thinking"]): string 
   return "high";
 }
 
-function resolveToolChoice(anthropic: AnthropicRequest): string | undefined {
+/**
+ * Map an Anthropic `tool_choice` to the object form CC's bridge requires.
+ * CC accepts `{type:"auto"|"any"|"tool", name?}` only. Anthropic "any" → "any";
+ * Anthropic "none" has no CC equivalent, so we omit it (default auto).
+ */
+function resolveToolChoice(anthropic: AnthropicRequest): CCToolChoice | undefined {
   const tc = anthropic.tool_choice;
-  if (!tc) return undefined;
-  if (tc.type === "auto") return undefined;
-  if (tc.type === "any") return "required";
-  if (tc.type === "tool") return tc.name;
-  if (tc.type === "none") return "none";
+  if (!tc || tc.type === "auto" || tc.type === "none") return undefined;
+  if (tc.type === "any") return { type: "any" };
+  if (tc.type === "tool") return { type: "tool", name: tc.name };
   return undefined;
 }
 
@@ -309,6 +311,11 @@ export class AnthropicStreamEncoder {
     const finishReason = (event.data.finishReason as string) ?? "stop";
     const usage = extractUsage(event.data as Record<string, unknown>);
 
+    // CC's `start` event carries no usage — input/output token counts are only
+    // known at `finish`. Anthropic's SDK merges `message_delta.usage` over the
+    // `message_start.usage`, so emitting them here corrects the final values
+    // (message_start reported input_tokens as 0 because start was empty).
+    const cachedTokens = usage?.promptTokensDetails?.cachedTokens;
     records.push({
       event: "message_delta",
       data: {
@@ -318,7 +325,9 @@ export class AnthropicStreamEncoder {
           stop_sequence: null,
         },
         usage: {
+          input_tokens: usage?.promptTokens ?? 0,
           output_tokens: usage?.completionTokens ?? 0,
+          ...(cachedTokens != null ? { cache_read_input_tokens: cachedTokens } : {}),
         },
       },
     });
@@ -542,7 +551,7 @@ export function buildAnthropicResponse(
       input_tokens: usage?.promptTokens ?? 0,
       output_tokens: usage?.completionTokens ?? 0,
       cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
+      cache_read_input_tokens: usage?.promptTokensDetails?.cachedTokens ?? 0,
     },
   };
 }

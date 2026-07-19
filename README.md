@@ -73,14 +73,21 @@ commandcode-api-proxy auth logout
 
 Equivalent env vars (lower priority than CLI flags):
 
-| Env var          | Description                                  |
-| ---------------- | -------------------------------------------- |
-| `HOST`           | Bind address                                 |
-| `PORT`           | Port                                         |
-| `CC_API_KEY`     | Command Code API key                         |
-| `CC_API_BASE`    | Upstream API base URL                        |
-| `CC_CLI_VERSION` | CLI version sent upstream                    |
-| `LOG_LEVEL`      | Log level (`info`, `debug`, etc.)            |
+| Env var          | Description                                                                                                             |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `HOST`           | Bind address                                                                                                            |
+| `PORT`           | Port                                                                                                                    |
+| `CC_API_KEY`     | Command Code API key                                                                                                    |
+| `CC_API_BASE`    | Upstream API base URL                                                                                                   |
+| `CC_CLI_VERSION` | CLI version sent upstream                                                                                               |
+| `LOG_LEVEL`      | Log level (`info`, `debug`, etc.)                                                                                       |
+| `CORS_ORIGIN`    | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
+
+> **Security:** the proxy forwards your paid Command Code key upstream and
+> accepts any auth token from clients (`proxy-managed`), so it is designed for
+> **localhost** use (`HOST=127.0.0.1`). Do not bind it to `0.0.0.0` on an
+> untrusted network without restricting `CORS_ORIGIN` and putting your own auth
+> in front.
 
 ## Endpoints
 
@@ -140,11 +147,11 @@ npx commandcode-api-proxy --setup-claude-code
 
 If a settings file already exists, re-run with `--force` to overwrite it.
 
-| Claude Code tier | Env var                          | Maps to                     |
-| ---------------- | -------------------------------- | --------------------------- |
-| `sonnet`         | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `deepseek/deepseek-v4-pro`  |
-| `opus`           | `ANTHROPIC_DEFAULT_OPUS_MODEL`   | `deepseek/deepseek-v4-pro`  |
-| `haiku`          | `ANTHROPIC_DEFAULT_HAIKU_MODEL`  | `deepseek/deepseek-v4-flash`|
+| Claude Code tier | Env var                          | Maps to                      |
+| ---------------- | -------------------------------- | ---------------------------- |
+| `sonnet`         | `ANTHROPIC_DEFAULT_SONNET_MODEL` | `deepseek/deepseek-v4-pro`   |
+| `opus`           | `ANTHROPIC_DEFAULT_OPUS_MODEL`   | `deepseek/deepseek-v4-pro`   |
+| `haiku`          | `ANTHROPIC_DEFAULT_HAIKU_MODEL`  | `deepseek/deepseek-v4-flash` |
 
 Edit those env vars in the settings file to point at other CC models. To force
 every `claude-*` request to a single model regardless of tier, set
@@ -165,22 +172,22 @@ claude-proxy
 
 Short names work in addition to full model IDs:
 
-| Alias                                              | Maps to                        |
-| -------------------------------------------------- | ------------------------------ |
-| `deepseek-v4-pro`, `deepseek-v4`, `deepseek-pro`   | `deepseek/deepseek-v4-pro`     |
-| `deepseek-v4-flash`, `deepseek-flash`              | `deepseek/deepseek-v4-flash`   |
-| `kimi-k2.6`, `kimi2.6`                             | `moonshotai/Kimi-K2.6`         |
-| `kimi-k2.5`, `kimi2.5`                             | `moonshotai/Kimi-K2.5`         |
-| `glm-5.1`                                          | `zai-org/GLM-5.1`              |
-| `glm-5`                                            | `zai-org/GLM-5`                |
-| `minimax-m2.7`, `minimax2.7`                       | `MiniMaxAI/MiniMax-M2.7`       |
-| `minimax-m2.5`, `minimax2.5`                       | `MiniMaxAI/MiniMax-M2.5`       |
-| `qwen3.6-max`, `qwen-3.6-max`                      | `Qwen/Qwen3.6-Max-Preview`     |
-| `qwen3.6-plus`, `qwen-3.6-plus`                    | `Qwen/Qwen3.6-Plus`            |
-| `qwen3.7-max`, `qwen-3.7-max`                      | `Qwen/Qwen3.7-Max`             |
-| `qwen3.7-plus`, `qwen-3.7-plus`                    | `Qwen/Qwen3.7-Plus`            |
-| `step3.5`, `step-3.5-flash`                        | `stepfun/Step-3.5-Flash`       |
-| `mimo-v2.5`, `mimo2.5`                             | `xiaomi/mimo-v2.5`             |
+| Alias                                            | Maps to                      |
+| ------------------------------------------------ | ---------------------------- |
+| `deepseek-v4-pro`, `deepseek-v4`, `deepseek-pro` | `deepseek/deepseek-v4-pro`   |
+| `deepseek-v4-flash`, `deepseek-flash`            | `deepseek/deepseek-v4-flash` |
+| `kimi-k2.6`, `kimi2.6`                           | `moonshotai/Kimi-K2.6`       |
+| `kimi-k2.5`, `kimi2.5`                           | `moonshotai/Kimi-K2.5`       |
+| `glm-5.1`                                        | `zai-org/GLM-5.1`            |
+| `glm-5`                                          | `zai-org/GLM-5`              |
+| `minimax-m2.7`, `minimax2.7`                     | `MiniMaxAI/MiniMax-M2.7`     |
+| `minimax-m2.5`, `minimax2.5`                     | `MiniMaxAI/MiniMax-M2.5`     |
+| `qwen3.6-max`, `qwen-3.6-max`                    | `Qwen/Qwen3.6-Max-Preview`   |
+| `qwen3.6-plus`, `qwen-3.6-plus`                  | `Qwen/Qwen3.6-Plus`          |
+| `qwen3.7-max`, `qwen-3.7-max`                    | `Qwen/Qwen3.7-Max`           |
+| `qwen3.7-plus`, `qwen-3.7-plus`                  | `Qwen/Qwen3.7-Plus`          |
+| `step3.5`, `step-3.5-flash`                      | `stepfun/Step-3.5-Flash`     |
+| `mimo-v2.5`, `mimo2.5`                           | `xiaomi/mimo-v2.5`           |
 
 Any model ID is passed through as-is — the proxy does not validate against a fixed list.
 

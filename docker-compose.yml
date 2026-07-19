@@ -5,11 +5,15 @@ services:
     container_name: commandcode-api-proxy
     restart: unless-stopped
     ports:
-      - "8787:8787"
+      # Bind host-side to localhost only so the proxy (which forwards your paid
+      # CC key with no real auth) is not exposed to the LAN. Remove the
+      # 127.0.0.1: prefix only if you intentionally want network access.
+      - "127.0.0.1:8787:8787"
     environment:
       - HOST=0.0.0.0
       - PORT=8787
       - CC_API_KEY=${CC_API_KEY:-}
       - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
-      - ~/.commandcode:/home/node/.commandcode:ro
+      # auth.json lives at ~/.config/commandcode-api-proxy/auth.json (see auth.ts).
+      - ~/.config/commandcode-api-proxy:/home/node/.config/commandcode-api-proxy:ro

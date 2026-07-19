@@ -10,6 +10,7 @@ import type {
   CCContentPart,
   CCTool,
   CCRequestBody,
+  CCToolChoice,
   CCEvent,
   UsageData,
 } from "@/translate/types.js";
@@ -133,12 +134,18 @@ function toCCTools(tools: OpenAITool[] | undefined): CCTool[] | undefined {
   }));
 }
 
-function resolveToolChoice(tc: ToolChoice | undefined): string | undefined {
-  if (!tc || tc === "auto") return undefined;
-  if (tc === "none") return "none";
-  if (tc === "required") return "required";
+/**
+ * Map an OpenAI `tool_choice` to the object form CC's bridge requires.
+ * CC validates `params.tool_choice` as an object and rejects bare strings.
+ * Accepted types: "auto" | "any" | "tool". There is no "required" (use "any")
+ * and no "none" — "none" has no CC equivalent, so we fall back to the default
+ * (omit) and let the model decide.
+ */
+function resolveToolChoice(tc: ToolChoice | undefined): CCToolChoice | undefined {
+  if (!tc || tc === "auto" || tc === "none") return undefined;
+  if (tc === "required") return { type: "any" };
   if (typeof tc === "object" && tc.type === "function") {
-    return tc.function.name;
+    return { type: "tool", name: tc.function.name };
   }
   return undefined;
 }

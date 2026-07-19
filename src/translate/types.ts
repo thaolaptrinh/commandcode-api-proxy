@@ -99,10 +99,18 @@ export interface CCRequestBody {
     stream: boolean;
     reasoning_effort?: string;
     tools?: CCTool[];
-    tool_choice?: string;
+    /**
+     * CC's bridge validates `tool_choice` as an object (it rejects a bare
+     * string with 400 "expected object, received string"). The accepted shape
+     * is a discriminated union: `{type:"auto"}`, `{type:"any"}`, or
+     * `{type:"tool", name}`. There is NO "required" (use "any") and NO "none".
+     */
+    tool_choice?: CCToolChoice;
   };
   threadId: string;
 }
+
+export type CCToolChoice = { type: "auto" } | { type: "any" } | { type: "tool"; name: string };
 
 export type CCEventType =
   | "start"

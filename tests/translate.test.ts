@@ -214,6 +214,28 @@ describe("toCCRequest", () => {
 
     expect(toolResultIds).not.toContain("call_missing");
   });
+
+  it("tool_choice maps to CC object form (no bare strings)", () => {
+    const base: OpenAIChatRequest = {
+      model: "default",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "calc", parameters: {} } }],
+    };
+    // auto/none → omitted (CC has no "none"; default is auto)
+    expect(toCCRequest({ ...base, tool_choice: "auto" }).params.tool_choice).toBeUndefined();
+    expect(toCCRequest({ ...base, tool_choice: "none" }).params.tool_choice).toBeUndefined();
+    // required → {type:"any"} (CC has no "required")
+    expect(toCCRequest({ ...base, tool_choice: "required" }).params.tool_choice).toEqual({
+      type: "any",
+    });
+    // specific function → {type:"tool", name}
+    expect(
+      toCCRequest({
+        ...base,
+        tool_choice: { type: "function", function: { name: "calc" } },
+      }).params.tool_choice,
+    ).toEqual({ type: "tool", name: "calc" });
+  });
 });
 
 // ──────────────────────────────────────────

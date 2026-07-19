@@ -194,7 +194,7 @@ describe("toCCRequest", () => {
     expect(parts[0].text).toBe("The answer is 42");
   });
 
-  it("tool_choice mapping", () => {
+  it("tool_choice mapping (CC object form)", () => {
     const base: AnthropicRequest = {
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 100,
@@ -202,16 +202,21 @@ describe("toCCRequest", () => {
       tools: [{ name: "calc", input_schema: {} }],
     };
 
+    // CC's bridge requires an OBJECT; auto/none have no CC equivalent and are omitted.
     expect(
       toCCRequest({ ...base, tool_choice: { type: "auto" } }).params.tool_choice,
     ).toBeUndefined();
-    expect(toCCRequest({ ...base, tool_choice: { type: "any" } }).params.tool_choice).toBe(
-      "required",
-    );
+    expect(
+      toCCRequest({ ...base, tool_choice: { type: "none" } }).params.tool_choice,
+    ).toBeUndefined();
+    // Anthropic "any" → CC {type:"any"} (CC has no "required").
+    expect(toCCRequest({ ...base, tool_choice: { type: "any" } }).params.tool_choice).toEqual({
+      type: "any",
+    });
+    // Anthropic "tool" → CC {type:"tool", name}.
     expect(
       toCCRequest({ ...base, tool_choice: { type: "tool", name: "calc" } }).params.tool_choice,
-    ).toBe("calc");
-    expect(toCCRequest({ ...base, tool_choice: { type: "none" } }).params.tool_choice).toBe("none");
+    ).toEqual({ type: "tool", name: "calc" });
   });
 
   it("no-tools safeguard not injected for Anthropic", () => {
@@ -278,6 +283,28 @@ describe("AnthropicStreamEncoder", () => {
       const md = finish.find((c) => c.event === "message_delta");
       expect((md!.data.delta as { stop_reason: string })?.stop_reason).toBe(expected);
     }
+  });
+
+  it("message_delta carries input_tokens/cache_read from finish usage (start carries none)", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    encoder.emit({ type: "start", data: {} }); // empty start, like real CC
+    encoder.emit({ type: "text-delta", data: { text: "hi" } });
+    const finish = encoder.emit({
+      type: "finish",
+      data: {
+        finishReason: "stop",
+        totalUsage: { inputTokens: 7856, outputTokens: 67, cachedInputTokens: 7424 },
+      },
+    });
+    const md = finish.find((c) => c.event === "message_delta");
+    const usage = md!.data.usage as {
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_input_tokens?: number;
+    };
+    expect(usage.input_tokens).toBe(7856);
+    expect(usage.output_tokens).toBe(67);
+    expect(usage.cache_read_input_tokens).toBe(7424);
   });
 
   it("thinking block emits signature_delta on close", () => {
