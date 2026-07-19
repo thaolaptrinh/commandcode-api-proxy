@@ -85,37 +85,34 @@ describe("toCCRequest", () => {
     expect(part.toolName).toBe("weather");
   });
 
-  it("thinking maps to reasoning_effort", () => {
-    const req: AnthropicRequest = {
+  // claude-* resolves to the default model (deepseek-v4-pro), whose CC effort
+  // set is {high, max}. So low/medium budgets clip up to "high", and very large
+  // budgets reach "max". See resolveEffortForModel.
+  it("thinking budget maps to a valid effort for the resolved model (clipped)", () => {
+    const base = (budget_tokens: number): AnthropicRequest => ({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 4000,
-      thinking: { type: "enabled", budget_tokens: 3000 },
+      max_tokens: 64000,
+      thinking: { type: "enabled", budget_tokens },
       messages: [{ role: "user", content: "Hi" }],
-    };
-    const result = toCCRequest(req);
-    expect(result.params.reasoning_effort).toBe("medium");
+    });
+    expect(toCCRequest(base(1500)).params.reasoning_effort).toBe("high"); // low → high
+    expect(toCCRequest(base(3000)).params.reasoning_effort).toBe("high"); // medium → high
+    expect(toCCRequest(base(10000)).params.reasoning_effort).toBe("high"); // high → high
+    expect(toCCRequest(base(24000)).params.reasoning_effort).toBe("high"); // xhigh → high (not in set)
+    expect(toCCRequest(base(40000)).params.reasoning_effort).toBe("max"); // max → max
   });
 
-  it("thinking with low budget maps to low", () => {
-    const req: AnthropicRequest = {
-      model: "claude-sonnet-4-5-20250929",
-      max_tokens: 4000,
-      thinking: { type: "enabled", budget_tokens: 1500 },
+  it("thinking budget clips to the model's own effort set (grok-4.5: low/med/high)", () => {
+    const base = (budget_tokens: number): AnthropicRequest => ({
+      model: "grok-4.5",
+      max_tokens: 64000,
+      thinking: { type: "enabled", budget_tokens },
       messages: [{ role: "user", content: "Hi" }],
-    };
-    const result = toCCRequest(req);
-    expect(result.params.reasoning_effort).toBe("low");
-  });
-
-  it("thinking with high budget maps to high", () => {
-    const req: AnthropicRequest = {
-      model: "claude-sonnet-4-5-20250929",
-      max_tokens: 4000,
-      thinking: { type: "enabled", budget_tokens: 10000 },
-      messages: [{ role: "user", content: "Hi" }],
-    };
-    const result = toCCRequest(req);
-    expect(result.params.reasoning_effort).toBe("high");
+    });
+    expect(toCCRequest(base(1500)).params.reasoning_effort).toBe("low");
+    expect(toCCRequest(base(3000)).params.reasoning_effort).toBe("medium");
+    expect(toCCRequest(base(10000)).params.reasoning_effort).toBe("high");
+    expect(toCCRequest(base(40000)).params.reasoning_effort).toBe("high"); // max → high (grok cap)
   });
 
   it("thinking not set = no reasoning_effort", () => {

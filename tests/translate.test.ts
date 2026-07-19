@@ -236,6 +236,22 @@ describe("toCCRequest", () => {
       }).params.tool_choice,
     ).toEqual({ type: "tool", name: "calc" });
   });
+
+  it("reasoning_effort passes through xhigh/max and clips per model", () => {
+    const withModel = (model: string, effort: string): OpenAIChatRequest => ({
+      model,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: effort as OpenAIChatRequest["reasoning_effort"],
+    });
+    // deepseek-v4-pro accepts {high, max}: max passes, low clips up to high.
+    expect(toCCRequest(withModel("deepseek-v4-pro", "max")).params.reasoning_effort).toBe("max");
+    expect(toCCRequest(withModel("deepseek-v4-pro", "low")).params.reasoning_effort).toBe("high");
+    expect(toCCRequest(withModel("deepseek-v4-pro", "xhigh")).params.reasoning_effort).toBe("high");
+    // grok-4.5 accepts {low, medium, high}: xhigh clips down to high.
+    expect(toCCRequest(withModel("grok-4.5", "xhigh")).params.reasoning_effort).toBe("high");
+    // Non-effort model (not catalogued) → pass through unchanged.
+    expect(toCCRequest(withModel("Qwen/Qwen3.7-Max", "high")).params.reasoning_effort).toBe("high");
+  });
 });
 
 // ──────────────────────────────────────────

@@ -20,12 +20,13 @@ import type {
   CCEvent,
 } from "@/translate/types.js";
 import { resolveAnthropicModel } from "@/translate/anthropic-models.js";
+import { resolveEffortForModel } from "@/translate/models.js";
 import { extractUsage, pruneDanglingTools, buildCCConfig } from "@/translate/util.js";
 import { logger } from "@/logger.js";
 
 // ── Constants ──
 
-const REASONING_THRESHOLDS = { LOW: 2000, MEDIUM: 8000 } as const;
+const REASONING_THRESHOLDS = { LOW: 2000, MEDIUM: 8000, HIGH: 16000, XHIGH: 32000 } as const;
 const ANTHROPIC_STOP_REASON_MAP: Record<string, AnthropicStopReason> = {
   stop: "end_turn",
   length: "max_tokens",
@@ -158,9 +159,12 @@ function toCCPartByBlock(block: AnthropicContentBlock): CCContentPart | null {
 
 function resolveReasoningEffort(thinking: AnthropicRequest["thinking"]): string | undefined {
   if (!thinking) return undefined;
-  if (thinking.budget_tokens <= REASONING_THRESHOLDS.LOW) return "low";
-  if (thinking.budget_tokens <= REASONING_THRESHOLDS.MEDIUM) return "medium";
-  return "high";
+  const b = thinking.budget_tokens;
+  if (b <= REASONING_THRESHOLDS.LOW) return "low";
+  if (b <= REASONING_THRESHOLDS.MEDIUM) return "medium";
+  if (b <= REASONING_THRESHOLDS.HIGH) return "high";
+  if (b <= REASONING_THRESHOLDS.XHIGH) return "xhigh";
+  return "max";
 }
 
 /**
@@ -222,7 +226,7 @@ export function toCCRequest(
       stop: req.stop_sequences,
       tools: ccTools,
       tool_choice: resolveToolChoice(req),
-      reasoning_effort: resolveReasoningEffort(req.thinking),
+      reasoning_effort: resolveEffortForModel(resolvedModel, resolveReasoningEffort(req.thinking)),
     },
     threadId: crypto.randomUUID(),
   };

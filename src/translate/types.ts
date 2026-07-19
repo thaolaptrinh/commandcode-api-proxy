@@ -14,7 +14,7 @@ export interface OpenAIChatRequest {
   stop?: string | string[];
   tools?: OpenAITool[];
   tool_choice?: ToolChoice;
-  reasoning_effort?: "low" | "medium" | "high";
+  reasoning_effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }
 
 export interface OpenAIMessage {

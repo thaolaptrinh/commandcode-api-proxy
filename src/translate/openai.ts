@@ -14,7 +14,7 @@ import type {
   CCEvent,
   UsageData,
 } from "@/translate/types.js";
-import { resolveModel } from "@/translate/models.js";
+import { resolveModel, resolveEffortForModel } from "@/translate/models.js";
 import {
   applyNoToolsSafeguard,
   extractUsage,
@@ -171,7 +171,7 @@ export function toCCRequest(
       temperature: req.temperature,
       top_p: req.top_p,
       stop: req.stop,
-      reasoning_effort: req.reasoning_effort,
+      reasoning_effort: resolveEffortForModel(resolvedModel, req.reasoning_effort),
       tools: toCCTools(req.tools),
       tool_choice: resolveToolChoice(req.tool_choice),
     },

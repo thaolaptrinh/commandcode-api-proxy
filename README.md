@@ -172,24 +172,45 @@ claude-proxy
 
 Short names work in addition to full model IDs:
 
-| Alias                                            | Maps to                      |
-| ------------------------------------------------ | ---------------------------- |
-| `deepseek-v4-pro`, `deepseek-v4`, `deepseek-pro` | `deepseek/deepseek-v4-pro`   |
-| `deepseek-v4-flash`, `deepseek-flash`            | `deepseek/deepseek-v4-flash` |
-| `kimi-k2.6`, `kimi2.6`                           | `moonshotai/Kimi-K2.6`       |
-| `kimi-k2.5`, `kimi2.5`                           | `moonshotai/Kimi-K2.5`       |
-| `glm-5.1`                                        | `zai-org/GLM-5.1`            |
-| `glm-5`                                          | `zai-org/GLM-5`              |
-| `minimax-m2.7`, `minimax2.7`                     | `MiniMaxAI/MiniMax-M2.7`     |
-| `minimax-m2.5`, `minimax2.5`                     | `MiniMaxAI/MiniMax-M2.5`     |
-| `qwen3.6-max`, `qwen-3.6-max`                    | `Qwen/Qwen3.6-Max-Preview`   |
-| `qwen3.6-plus`, `qwen-3.6-plus`                  | `Qwen/Qwen3.6-Plus`          |
-| `qwen3.7-max`, `qwen-3.7-max`                    | `Qwen/Qwen3.7-Max`           |
-| `qwen3.7-plus`, `qwen-3.7-plus`                  | `Qwen/Qwen3.7-Plus`          |
-| `step3.5`, `step-3.5-flash`                      | `stepfun/Step-3.5-Flash`     |
-| `mimo-v2.5`, `mimo2.5`                           | `xiaomi/mimo-v2.5`           |
+| Alias                                            | Maps to                               |
+| ------------------------------------------------ | ------------------------------------- |
+| `deepseek-v4-pro`, `deepseek-v4`, `deepseek-pro` | `deepseek/deepseek-v4-pro`            |
+| `deepseek-v4-flash`, `deepseek-flash`            | `deepseek/deepseek-v4-flash`          |
+| `glm-5.2`, `glm5.2`                              | `zai-org/GLM-5.2`                     |
+| `glm-5.2-fast`, `glm5.2-fast`                    | `zai-org/GLM-5.2-Fast`                |
+| `glm-5.1`                                        | `zai-org/GLM-5.1`                     |
+| `glm-5`                                          | `zai-org/GLM-5`                       |
+| `minimax-m3`, `minimax3`                         | `MiniMaxAI/MiniMax-M3`                |
+| `minimax-m2.7`, `minimax2.7`                     | `MiniMaxAI/MiniMax-M2.7`              |
+| `minimax-m2.5`, `minimax2.5`                     | `MiniMaxAI/MiniMax-M2.5`              |
+| `kimi-k3`, `kimi3`                               | `moonshotai/Kimi-K3`                  |
+| `kimi-k2.7-code`, `kimi-code`                    | `moonshotai/Kimi-K2.7-Code`           |
+| `kimi-k2.7-highspeed`, `kimi-highspeed`          | `moonshotai/Kimi-K2.7-Code-Highspeed` |
+| `kimi-k2.6`, `kimi2.6`                           | `moonshotai/Kimi-K2.6`                |
+| `kimi-k2.5`, `kimi2.5`                           | `moonshotai/Kimi-K2.5`                |
+| `qwen3.7-max`, `qwen-3.7-max`                    | `Qwen/Qwen3.7-Max`                    |
+| `qwen3.7-plus`, `qwen-3.7-plus`                  | `Qwen/Qwen3.7-Plus`                   |
+| `qwen3.6-max`, `qwen-3.6-max`                    | `Qwen/Qwen3.6-Max-Preview`            |
+| `qwen3.6-plus`, `qwen-3.6-plus`                  | `Qwen/Qwen3.6-Plus`                   |
+| `step-3.7-flash`, `step3.7`                      | `stepfun/Step-3.7-Flash`              |
+| `step3.5`, `step-3.5-flash`                      | `stepfun/Step-3.5-Flash`              |
+| `mimo-v2.5-pro`, `mimo-pro`                      | `xiaomi/mimo-v2.5-pro`                |
+| `mimo-v2.5`, `mimo2.5`                           | `xiaomi/mimo-v2.5`                    |
+| `grok-4.5`, `grok4.5`                            | `xai/grok-4.5`                        |
+| `nemotron`, `nemotron-3-ultra`                   | `nvidia/nemotron-3-ultra-550b-a55b`   |
+| `inkling`                                        | `thinkingmachines/inkling`            |
+| `hy3`                                            | `tencent/Hy3`                         |
 
 Any model ID is passed through as-is — the proxy does not validate against a fixed list.
+
+### Reasoning effort
+
+Some models support a `reasoning_effort` (`low` | `medium` | `high` | `xhigh` | `max`), and
+each accepts a different subset. The proxy sends the closest valid level for the model
+(e.g. `deepseek-v4-pro` supports only `high`/`max`, so `low` is clipped up to `high` and
+`max` is reachable). Models without a discrete effort set ignore the value. Pass the
+effort via OpenAI's `reasoning_effort`, or Anthropic's `thinking.budget_tokens`
+(larger budget → higher effort).
 
 ## License
 
