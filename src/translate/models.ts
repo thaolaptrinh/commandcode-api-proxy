@@ -74,8 +74,10 @@ export function resolveEffortForModel(
   requested?: string,
 ): string | undefined {
   const supported = REASONING_EFFORTS[canonicalModel];
-  // Uncatalogued model, or nothing requested → preserve as-is (undefined or the value).
-  if (!supported || !requested) return requested;
+  // Uncatalogued/empty effort set, or nothing requested → preserve as-is
+  // (undefined or the value). The empty-array guard matters: `[]` is truthy,
+  // and reduce() on it below would otherwise throw.
+  if (!supported || supported.length === 0 || !requested) return requested;
 
   if (supported.includes(requested)) return requested;
 
