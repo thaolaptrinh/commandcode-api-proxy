@@ -35,18 +35,21 @@ describe("setupOpenCodeConfig", () => {
     const config = JSON.parse(written as string);
     const models = config.provider.commandcode.models;
 
-    // deepseek-v4-pro supports {high, max}
-    expect(models["deepseek-v4-pro"].variants).toEqual({
-      high: { reasoningEffort: "high" },
-      max: { reasoningEffort: "max" },
-    });
+    // deepseek-v4-pro supports {high, max}; the other tiers are disabled so
+    // OpenCode's generic low/medium/high don't leak into the picker.
+    const ds = models["deepseek-v4-pro"].variants;
+    expect(ds.high).toEqual({ reasoningEffort: "high" });
+    expect(ds.max).toEqual({ reasoningEffort: "max" });
+    expect(ds.low).toEqual({ disabled: true });
+    expect(ds.medium).toEqual({ disabled: true });
     expect(models["deepseek-v4-pro"].reasoning).toBe(true);
-    // grok-4.5 supports {low, medium, high}
-    expect(models["grok-4.5"].variants).toEqual({
-      low: { reasoningEffort: "low" },
-      medium: { reasoningEffort: "medium" },
-      high: { reasoningEffort: "high" },
-    });
+
+    // grok-4.5 supports {low, medium, high}; xhigh/max disabled
+    const grok = models["grok-4.5"].variants;
+    expect(grok.low).toEqual({ reasoningEffort: "low" });
+    expect(grok.medium).toEqual({ reasoningEffort: "medium" });
+    expect(grok.high).toEqual({ reasoningEffort: "high" });
+    expect(grok.max).toEqual({ disabled: true });
 
     // models without discrete efforts get no variants field
     expect(models["Qwen3.7-Max"].variants).toBeUndefined();

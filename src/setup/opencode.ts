@@ -2,6 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import modelsData from "@/models.json" with { type: "json" };
 
+/** Every reasoning-effort tier CC/OpenCode know about, ordered low → max. */
+const EFFORT_UNIVERSE = ["low", "medium", "high", "xhigh", "max"] as const;
+
 function buildProviderConfig(): Record<string, unknown> {
   const contextWindows: Record<string, number> = modelsData.contextWindows ?? {};
   const maxOutputTokens: Record<string, number> =
@@ -20,15 +23,19 @@ function buildProviderConfig(): Record<string, unknown> {
         output: maxOutputTokens[id] ?? 128_000,
       },
     };
-    // OpenCode's `/variants` picker lists a model's `variants`. OpenCode only
-    // auto-generates reasoning variants from models.dev, which doesn't cover our
-    // custom IDs — so declare them explicitly. Each variant maps to a
-    // `reasoningEffort` option that the proxy forwards (and clips per model).
+    // OpenCode's `/variants` picker lists a model's `variants`. OpenCode also
+    // auto-generates generic `WIDELY_SUPPORTED_EFFORTS` (low/medium/high) for any
+    // reasoning-capable openai-compatible model and mergeDeep's them with our
+    // config — which would surface effort levels the model doesn't actually
+    // support. Declare the full effort universe and `disabled:true` the ones
+    // this model rejects; OpenCode filters disabled variants out (pickBy).
     const efforts = reasoningEfforts[id];
     if (efforts && efforts.length > 0) {
       entry.reasoning = true;
-      const variants: Record<string, { reasoningEffort: string }> = {};
-      for (const effort of efforts) variants[effort] = { reasoningEffort: effort };
+      const variants: Record<string, Record<string, unknown>> = {};
+      for (const e of EFFORT_UNIVERSE) {
+        variants[e] = efforts.includes(e) ? { reasoningEffort: e } : { disabled: true };
+      }
       entry.variants = variants;
     }
     models[key] = entry;
