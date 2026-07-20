@@ -8,16 +8,30 @@ function buildProviderConfig(): Record<string, unknown> {
     ((modelsData as Record<string, unknown>).maxOutputTokens as Record<string, number>) ?? {};
   const modelNames: Record<string, string> =
     ((modelsData as Record<string, unknown>).modelNames as Record<string, string>) ?? {};
-  const models: Record<string, { name: string; limit: { context: number; output: number } }> = {};
+  const reasoningEfforts: Record<string, string[]> =
+    ((modelsData as Record<string, unknown>).reasoningEfforts as Record<string, string[]>) ?? {};
+  const models: Record<string, Record<string, unknown>> = {};
   for (const id of modelsData.builtin) {
     const key = id.split("/").pop() ?? id;
-    models[key] = {
+    const entry: Record<string, unknown> = {
       name: modelNames[id] ?? key,
       limit: {
         context: contextWindows[id] ?? 128_000,
         output: maxOutputTokens[id] ?? 128_000,
       },
     };
+    // OpenCode's `/variants` picker lists a model's `variants`. OpenCode only
+    // auto-generates reasoning variants from models.dev, which doesn't cover our
+    // custom IDs — so declare them explicitly. Each variant maps to a
+    // `reasoningEffort` option that the proxy forwards (and clips per model).
+    const efforts = reasoningEfforts[id];
+    if (efforts && efforts.length > 0) {
+      entry.reasoning = true;
+      const variants: Record<string, { reasoningEffort: string }> = {};
+      for (const effort of efforts) variants[effort] = { reasoningEffort: effort };
+      entry.variants = variants;
+    }
+    models[key] = entry;
   }
   return {
     npm: "@ai-sdk/openai-compatible",
