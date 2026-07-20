@@ -38,10 +38,20 @@ export function resolveModel(model: string): string {
   if (!model || model === "default") {
     return BUILTIN_MODELS[0];
   }
-  const aliased = SHORT_ALIASES[model];
+  // Alias lookup is case-insensitive so callers can pass the bare model name
+  // with original casing (e.g. "GLM-5.2") as well as the lowercase short alias.
+  const aliased = SHORT_ALIASES[model] ?? SHORT_ALIASES[model.toLowerCase()];
   if (aliased) return aliased;
   // Already a full model ID (contains "/") — pass through untouched.
   if (model.includes("/")) return model;
+  // Bare name without an org prefix (e.g. "GLM-5.2", "Kimi-K3", or
+  // "nemotron-3-ultra-550b-a55b" — which has no short alias). Match it against
+  // the builtin catalog by last path segment so it still resolves to a full ID.
+  const lower = model.toLowerCase();
+  for (const id of BUILTIN_MODELS) {
+    const last = id.split("/").pop() ?? id;
+    if (last.toLowerCase() === lower) return id;
+  }
   return model;
 }
 

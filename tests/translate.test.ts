@@ -32,6 +32,17 @@ describe("resolveModel", () => {
     expect(resolveModel("anthropic/claude-sonnet-4")).toBe("anthropic/claude-sonnet-4");
     expect(resolveModel("custom/model-name")).toBe("custom/model-name");
   });
+
+  it("resolves bare last-segment names case-insensitively (OpenCode sends these)", () => {
+    // OpenCode's provider config keys models by the bare last path segment with
+    // original casing. The proxy must still map them to the full canonical ID.
+    expect(resolveModel("GLM-5.2")).toBe("zai-org/GLM-5.2");
+    expect(resolveModel("MiniMax-M3")).toBe("MiniMaxAI/MiniMax-M3");
+    expect(resolveModel("Kimi-K3")).toBe("moonshotai/Kimi-K3");
+    expect(resolveModel("Kimi-K2.7-Code-Highspeed")).toBe("moonshotai/Kimi-K2.7-Code-Highspeed");
+    // Bare name with no short alias still resolves via catalog last-segment.
+    expect(resolveModel("nemotron-3-ultra-550b-a55b")).toBe("nvidia/nemotron-3-ultra-550b-a55b");
+  });
 });
 
 // ──────────────────────────────────────────
