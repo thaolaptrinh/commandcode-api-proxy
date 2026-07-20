@@ -26,6 +26,7 @@ import type { AnthropicRequest } from "@/translate/anthropic-types.js";
 
 let config: Config;
 let modelList: string[] = getDefaultModels();
+let corsOrigin = "*";
 
 function updateModelList(models: string[]): void {
   if (models.length > 0) modelList = models;
@@ -35,20 +36,46 @@ function updateModelList(models: string[]): void {
 // Request body parser
 // ──────────────────────────────────────────
 
+const MAX_BODY_BYTES = 10 * 1024 * 1024; // 10 MiB
+
+export class BodyParseError extends Error {
+  constructor(
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = "BodyParseError";
+  }
+}
+
 function parseBody(req: http.IncomingMessage): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    let tooLarge = false;
+    req.on("data", (chunk: Buffer) => {
+      if (tooLarge) return;
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        tooLarge = true;
+        reject(new BodyParseError(413, "Request body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
+      if (tooLarge) return;
       const raw = Buffer.concat(chunks).toString("utf-8");
       if (!raw) return resolve(null);
       try {
         resolve(JSON.parse(raw));
       } catch {
-        reject(new Error("Invalid JSON body"));
+        reject(new BodyParseError(400, "Invalid JSON body"));
       }
     });
-    req.on("error", reject);
+    req.on("error", (err) => {
+      if (!tooLarge) reject(err);
+    });
   });
 }
 
@@ -70,10 +97,10 @@ function extractApiKey(req: http.IncomingMessage): string | null {
   // If the client sent "proxy-managed" or no key, fall back to the proxy's configured key
 
   if (!key || key === "proxy-managed" || key === "placeholder") {
-    logger.debug(`client key sentinel, using config key (prefix: "${config.apiKey?.slice(0, 8)}")`);
+    logger.debug(`client key sentinel, using config key (length: ${config.apiKey?.length ?? 0})`);
     return config.apiKey;
   }
-  logger.debug(`using client's own key (prefix: "${key.slice(0, 8)}")`);
+  logger.debug(`using client's own key (length: ${key.length})`);
   return key;
 }
 
@@ -82,6 +109,8 @@ function extractApiKey(req: http.IncomingMessage): string | null {
 // ──────────────────────────────────────────
 
 function sendJson(res: http.ServerResponse, status: number, data: unknown): void {
+  // Client may have disconnected mid-request; never write to a dead socket.
+  if (res.headersSent || res.writableEnded || res.destroyed) return;
   res.writeHead(status, {
     "Content-Type": "application/json",
     ...corsHeaders(),
@@ -109,16 +138,20 @@ function sendAnthropicError(
   type: string,
   message: string,
 ): void {
+  if (res.headersSent || res.writableEnded || res.destroyed) return;
   res.writeHead(status, { "Content-Type": "application/json", ...corsHeaders() });
   res.end(JSON.stringify({ type: "error", error: { type, message } }));
 }
 
 function corsHeaders(): Record<string, string> {
-  return {
-    "Access-Control-Allow-Origin": "*",
+  const origin = corsOrigin;
+  const headers: Record<string, string> = {
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, x-api-key",
   };
+  // Empty CORS_ORIGIN disables the header entirely (browser blocks cross-origin).
+  if (origin) headers["Access-Control-Allow-Origin"] = origin;
+  return headers;
 }
 
 // ──────────────────────────────────────────
@@ -196,8 +229,10 @@ async function handleChatCompletions(
   let rawBody: unknown;
   try {
     rawBody = await parseBody(req);
-  } catch {
-    return sendOpenAIError(res, 400, "Invalid JSON body");
+  } catch (err) {
+    const status = err instanceof BodyParseError ? err.status : 400;
+    const message = err instanceof BodyParseError ? err.message : "Invalid JSON body";
+    return sendOpenAIError(res, status, message);
   }
 
   let openAIReq;
@@ -285,8 +320,15 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
   let rawBody: unknown;
   try {
     rawBody = await parseBody(req);
-  } catch {
-    return sendAnthropicError(res, 400, "invalid_request_error", "Invalid JSON body");
+  } catch (err) {
+    const status = err instanceof BodyParseError ? err.status : 400;
+    const message = err instanceof BodyParseError ? err.message : "Invalid JSON body";
+    return sendAnthropicError(
+      res,
+      status,
+      status === 413 ? "api_error" : "invalid_request_error",
+      message,
+    );
   }
 
   let anthropicReq: AnthropicRequest;
@@ -365,8 +407,15 @@ async function handleCountTokens(
   let rawBody: unknown;
   try {
     rawBody = await parseBody(req);
-  } catch {
-    return sendAnthropicError(res, 400, "invalid_request_error", "Invalid JSON body");
+  } catch (err) {
+    const status = err instanceof BodyParseError ? err.status : 400;
+    const message = err instanceof BodyParseError ? err.message : "Invalid JSON body";
+    return sendAnthropicError(
+      res,
+      status,
+      status === 413 ? "api_error" : "invalid_request_error",
+      message,
+    );
   }
 
   const body = rawBody as Record<string, unknown>;
@@ -455,6 +504,7 @@ interface RouteEntry {
 
 export function createServer(cfg: Config): http.Server {
   config = cfg;
+  corsOrigin = cfg.corsOrigin;
 
   // Start fetching model list in background (only if we have a key to use).
   if (cfg.apiKey) {

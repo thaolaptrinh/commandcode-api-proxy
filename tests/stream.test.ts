@@ -1,12 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Readable } from "node:stream";
-import {
-  parseCCLine,
-  formatSSE,
-  formatSSEDone,
-  formatAnthropicSSE,
-  NDJSONParser,
-} from "@/stream.js";
+import { parseCCLine, formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
 
 describe("parseCCLine", () => {
   it("parses a CC event with data: prefix", () => {
@@ -76,104 +69,6 @@ describe("formatSSE", () => {
 describe("formatSSEDone", () => {
   it("returns [DONE] signal", () => {
     expect(formatSSEDone()).toBe("data: [DONE]\n\n");
-  });
-});
-
-describe("NDJSONParser", () => {
-  it("parses NDJSON lines into CCEvent objects", async () => {
-    const input = Buffer.from(
-      '{"type":"start","data":{"model":"test"}}\n{"type":"text-delta","data":{"text":"Hi"}}\n',
-    );
-    const stream = Readable.from([input]);
-    const parser = stream.pipe(new NDJSONParser());
-
-    const events: any[] = [];
-    for await (const event of parser) {
-      events.push(event);
-    }
-
-    expect(events).toHaveLength(2);
-    expect(events[0].type).toBe("start");
-    expect(events[1].type).toBe("text-delta");
-    expect(events[1].data.text).toBe("Hi");
-  });
-
-  it("handles data: prefix", async () => {
-    const input = Buffer.from('data: {"type":"text-delta","data":{"text":"Hello"}}\n');
-    const stream = Readable.from([input]);
-    const parser = stream.pipe(new NDJSONParser());
-
-    const events: any[] = [];
-    for await (const event of parser) {
-      events.push(event);
-    }
-
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("text-delta");
-  });
-
-  it("skips empty lines and [DONE]", async () => {
-    const input = Buffer.from(
-      '{"type":"start","data":{}}\n\ndata: [DONE]\n{"type":"finish","data":{}}\n',
-    );
-    const stream = Readable.from([input]);
-    const parser = stream.pipe(new NDJSONParser());
-
-    const events: any[] = [];
-    for await (const event of parser) {
-      events.push(event);
-    }
-
-    expect(events).toHaveLength(2);
-    expect(events[0].type).toBe("start");
-    expect(events[1].type).toBe("finish");
-  });
-
-  it("handles fragmented chunks (partial lines)", async () => {
-    const parser = new NDJSONParser();
-    const events: any[] = [];
-    parser.on("data", (event: any) => events.push(event));
-
-    // Push partial line, then the rest
-    parser.write(Buffer.from('{"type":"text-delta","data":{"tex'));
-    parser.write(Buffer.from('t":"World"}}\n'));
-    parser.end();
-
-    await new Promise<void>((resolve) => parser.on("end", resolve));
-
-    expect(events).toHaveLength(1);
-    expect(events[0].type).toBe("text-delta");
-    expect(events[0].data.text).toBe("World");
-  });
-
-  it("handles multiple events in a single chunk", async () => {
-    const input = Buffer.from(
-      '{"type":"start","data":{}}\n{"type":"text-delta","data":{"text":"A"}}\n{"type":"finish","data":{}}\n',
-    );
-    const stream = Readable.from([input]);
-    const parser = stream.pipe(new NDJSONParser());
-
-    const events: any[] = [];
-    for await (const event of parser) {
-      events.push(event);
-    }
-
-    expect(events).toHaveLength(3);
-  });
-
-  it("flushes remaining buffer on end", async () => {
-    const parser = new NDJSONParser();
-    const events: any[] = [];
-    parser.on("data", (event: any) => events.push(event));
-
-    // Push a line without newline — should be flushed on end
-    parser.write(Buffer.from('{"type":"text-delta","data":{"text":"flushed"}}'));
-    parser.end();
-
-    await new Promise<void>((resolve) => parser.on("end", resolve));
-
-    expect(events).toHaveLength(1);
-    expect(events[0].data.text).toBe("flushed");
   });
 });
 

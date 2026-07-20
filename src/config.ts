@@ -14,6 +14,7 @@ export interface Config {
   ccApiBase: string;
   ccVersion: string;
   logLevel: string;
+  corsOrigin: string;
 }
 
 /**
@@ -81,6 +82,9 @@ export function loadConfig(): Config {
   const ccApiBase = process.env.CC_API_BASE || "https://api.commandcode.ai";
   const ccVersion = process.env.CC_CLI_VERSION || cachedVersion || DEFAULT_CC_VERSION;
   const logLevel = process.env.LOG_LEVEL || "info";
+  // `*` is fine for a localhost proxy; restrict (e.g. to an origin or leave
+  // empty to disable) before exposing the proxy on a network.
+  const corsOrigin = process.env.CORS_ORIGIN ?? "*";
 
-  return { host, port, apiKey, ccApiBase, ccVersion, logLevel };
+  return { host, port, apiKey, ccApiBase, ccVersion, logLevel, corsOrigin };
 }

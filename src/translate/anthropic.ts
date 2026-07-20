@@ -12,18 +12,21 @@ import type {
   ContentBlockStartShape,
   DeltaShape,
 } from "@/translate/anthropic-types.js";
-import type { CCMessage, CCContentPart, CCRequestBody, CCEvent } from "@/translate/types.js";
+import type {
+  CCMessage,
+  CCContentPart,
+  CCRequestBody,
+  CCToolChoice,
+  CCEvent,
+} from "@/translate/types.js";
 import { resolveAnthropicModel } from "@/translate/anthropic-models.js";
-import {
-  extractUsage,
-  pruneDanglingTools,
-  buildCCConfig,
-} from "@/translate/util.js";
+import { resolveEffortForModel } from "@/translate/models.js";
+import { extractUsage, pruneDanglingTools, buildCCConfig } from "@/translate/util.js";
 import { logger } from "@/logger.js";
 
 // ── Constants ──
 
-const REASONING_THRESHOLDS = { LOW: 2000, MEDIUM: 8000 } as const;
+const REASONING_THRESHOLDS = { LOW: 2000, MEDIUM: 8000, HIGH: 16000, XHIGH: 32000 } as const;
 const ANTHROPIC_STOP_REASON_MAP: Record<string, AnthropicStopReason> = {
   stop: "end_turn",
   length: "max_tokens",
@@ -138,10 +141,7 @@ function toCCMessages(messages: AnthropicRequest["messages"]): {
 
   return {
     ccMessages: pruneDanglingTools(ccMessages),
-    systemPrompt:
-      systemParts.length > 0
-        ? systemParts.join("\n\n")
-        : undefined,
+    systemPrompt: systemParts.length > 0 ? systemParts.join("\n\n") : undefined,
   };
 }
 
@@ -159,18 +159,24 @@ function toCCPartByBlock(block: AnthropicContentBlock): CCContentPart | null {
 
 function resolveReasoningEffort(thinking: AnthropicRequest["thinking"]): string | undefined {
   if (!thinking) return undefined;
-  if (thinking.budget_tokens <= REASONING_THRESHOLDS.LOW) return "low";
-  if (thinking.budget_tokens <= REASONING_THRESHOLDS.MEDIUM) return "medium";
-  return "high";
+  const b = thinking.budget_tokens;
+  if (b <= REASONING_THRESHOLDS.LOW) return "low";
+  if (b <= REASONING_THRESHOLDS.MEDIUM) return "medium";
+  if (b <= REASONING_THRESHOLDS.HIGH) return "high";
+  if (b <= REASONING_THRESHOLDS.XHIGH) return "xhigh";
+  return "max";
 }
 
-function resolveToolChoice(anthropic: AnthropicRequest): string | undefined {
+/**
+ * Map an Anthropic `tool_choice` to the object form CC's bridge requires.
+ * CC accepts `{type:"auto"|"any"|"tool", name?}` only. Anthropic "any" → "any";
+ * Anthropic "none" has no CC equivalent, so we omit it (default auto).
+ */
+function resolveToolChoice(anthropic: AnthropicRequest): CCToolChoice | undefined {
   const tc = anthropic.tool_choice;
-  if (!tc) return undefined;
-  if (tc.type === "auto") return undefined;
-  if (tc.type === "any") return "required";
-  if (tc.type === "tool") return tc.name;
-  if (tc.type === "none") return "none";
+  if (!tc || tc.type === "auto" || tc.type === "none") return undefined;
+  if (tc.type === "any") return { type: "any" };
+  if (tc.type === "tool") return { type: "tool", name: tc.name };
   return undefined;
 }
 
@@ -220,7 +226,7 @@ export function toCCRequest(
       stop: req.stop_sequences,
       tools: ccTools,
       tool_choice: resolveToolChoice(req),
-      reasoning_effort: resolveReasoningEffort(req.thinking),
+      reasoning_effort: resolveEffortForModel(resolvedModel, resolveReasoningEffort(req.thinking)),
     },
     threadId: crypto.randomUUID(),
   };
@@ -309,6 +315,11 @@ export class AnthropicStreamEncoder {
     const finishReason = (event.data.finishReason as string) ?? "stop";
     const usage = extractUsage(event.data as Record<string, unknown>);
 
+    // CC's `start` event carries no usage — input/output token counts are only
+    // known at `finish`. Anthropic's SDK merges `message_delta.usage` over the
+    // `message_start.usage`, so emitting them here corrects the final values
+    // (message_start reported input_tokens as 0 because start was empty).
+    const cachedTokens = usage?.promptTokensDetails?.cachedTokens;
     records.push({
       event: "message_delta",
       data: {
@@ -318,7 +329,9 @@ export class AnthropicStreamEncoder {
           stop_sequence: null,
         },
         usage: {
+          input_tokens: usage?.promptTokens ?? 0,
           output_tokens: usage?.completionTokens ?? 0,
+          ...(cachedTokens != null ? { cache_read_input_tokens: cachedTokens } : {}),
         },
       },
     });
@@ -542,7 +555,7 @@ export function buildAnthropicResponse(
       input_tokens: usage?.promptTokens ?? 0,
       output_tokens: usage?.completionTokens ?? 0,
       cache_creation_input_tokens: 0,
-      cache_read_input_tokens: 0,
+      cache_read_input_tokens: usage?.promptTokensDetails?.cachedTokens ?? 0,
     },
   };
 }

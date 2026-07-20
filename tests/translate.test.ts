@@ -32,6 +32,17 @@ describe("resolveModel", () => {
     expect(resolveModel("anthropic/claude-sonnet-4")).toBe("anthropic/claude-sonnet-4");
     expect(resolveModel("custom/model-name")).toBe("custom/model-name");
   });
+
+  it("resolves bare last-segment names case-insensitively (OpenCode sends these)", () => {
+    // OpenCode's provider config keys models by the bare last path segment with
+    // original casing. The proxy must still map them to the full canonical ID.
+    expect(resolveModel("GLM-5.2")).toBe("zai-org/GLM-5.2");
+    expect(resolveModel("MiniMax-M3")).toBe("MiniMaxAI/MiniMax-M3");
+    expect(resolveModel("Kimi-K3")).toBe("moonshotai/Kimi-K3");
+    expect(resolveModel("Kimi-K2.7-Code-Highspeed")).toBe("moonshotai/Kimi-K2.7-Code-Highspeed");
+    // Bare name with no short alias still resolves via catalog last-segment.
+    expect(resolveModel("nemotron-3-ultra-550b-a55b")).toBe("nvidia/nemotron-3-ultra-550b-a55b");
+  });
 });
 
 // ──────────────────────────────────────────
@@ -213,6 +224,44 @@ describe("toCCRequest", () => {
       .map((p: any) => p.toolCallId);
 
     expect(toolResultIds).not.toContain("call_missing");
+  });
+
+  it("tool_choice maps to CC object form (no bare strings)", () => {
+    const base: OpenAIChatRequest = {
+      model: "default",
+      messages: [{ role: "user", content: "hi" }],
+      tools: [{ type: "function", function: { name: "calc", parameters: {} } }],
+    };
+    // auto/none → omitted (CC has no "none"; default is auto)
+    expect(toCCRequest({ ...base, tool_choice: "auto" }).params.tool_choice).toBeUndefined();
+    expect(toCCRequest({ ...base, tool_choice: "none" }).params.tool_choice).toBeUndefined();
+    // required → {type:"any"} (CC has no "required")
+    expect(toCCRequest({ ...base, tool_choice: "required" }).params.tool_choice).toEqual({
+      type: "any",
+    });
+    // specific function → {type:"tool", name}
+    expect(
+      toCCRequest({
+        ...base,
+        tool_choice: { type: "function", function: { name: "calc" } },
+      }).params.tool_choice,
+    ).toEqual({ type: "tool", name: "calc" });
+  });
+
+  it("reasoning_effort passes through xhigh/max and clips per model", () => {
+    const withModel = (model: string, effort: string): OpenAIChatRequest => ({
+      model,
+      messages: [{ role: "user", content: "hi" }],
+      reasoning_effort: effort as OpenAIChatRequest["reasoning_effort"],
+    });
+    // deepseek-v4-pro accepts {high, max}: max passes, low clips up to high.
+    expect(toCCRequest(withModel("deepseek-v4-pro", "max")).params.reasoning_effort).toBe("max");
+    expect(toCCRequest(withModel("deepseek-v4-pro", "low")).params.reasoning_effort).toBe("high");
+    expect(toCCRequest(withModel("deepseek-v4-pro", "xhigh")).params.reasoning_effort).toBe("high");
+    // grok-4.5 accepts {low, medium, high}: xhigh clips down to high.
+    expect(toCCRequest(withModel("grok-4.5", "xhigh")).params.reasoning_effort).toBe("high");
+    // Non-effort model (not catalogued) → pass through unchanged.
+    expect(toCCRequest(withModel("Qwen/Qwen3.7-Max", "high")).params.reasoning_effort).toBe("high");
   });
 });
 

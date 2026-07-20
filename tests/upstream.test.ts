@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { Readable } from "node:stream";
-import { buildHeaders, collectEvents } from "@/upstream.js";
+import { buildHeaders, collectEvents, sendToCC, UpstreamError } from "@/upstream.js";
 import type { CCEvent, CCRequestBody } from "@/translate/types.js";
 
 const sampleBody = (overrides: Partial<CCRequestBody> = {}): CCRequestBody => ({
@@ -83,5 +83,85 @@ describe("collectEvents", () => {
     const stream = new Readable({ objectMode: true, read() {} });
     process.nextTick(() => stream.destroy(new Error("boom")));
     await expect(collectEvents(stream)).rejects.toThrow("boom");
+  });
+});
+
+// Minimal fake Response for sendToCC retry tests.
+function fakeResponse(opts: {
+  ok: boolean;
+  status: number;
+  text?: string;
+  bodyLines?: string[];
+}): Response {
+  const enc = new TextEncoder();
+  const lines = opts.bodyLines ?? [];
+  let i = 0;
+  const reader = {
+    read: async () =>
+      i < lines.length
+        ? { done: false, value: enc.encode(lines[i++]) }
+        : { done: true, value: undefined },
+  };
+  return {
+    ok: opts.ok,
+    status: opts.status,
+    statusText: "",
+    text: async () => opts.text ?? "",
+    body: { getReader: () => reader },
+  } as unknown as Response;
+}
+
+describe("sendToCC retry", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  it("retries on 5xx then succeeds", async () => {
+    const mock = vi.fn();
+    mock.mockResolvedValueOnce(fakeResponse({ ok: false, status: 503, text: "down" }));
+    mock.mockResolvedValueOnce(
+      fakeResponse({
+        ok: true,
+        status: 200,
+        bodyLines: [
+          '{"type":"start","data":{}}\n',
+          '{"type":"finish","data":{"finishReason":"stop","totalUsage":{"inputTokens":5,"outputTokens":2}}}\n',
+        ],
+      }),
+    );
+    globalThis.fetch = mock as unknown as typeof fetch;
+
+    const { stream } = await sendToCC(sampleBody(), {
+      apiBase: "https://example.test",
+      apiKey: "k",
+      ccVersion: "0.0.0",
+    });
+    expect(mock).toHaveBeenCalledTimes(2);
+    const events = await collectEvents(stream);
+    expect(events.some((e) => e.type === "finish")).toBe(true);
+  });
+
+  it("does not retry on non-retryable 4xx", async () => {
+    const mock = vi.fn().mockResolvedValue(fakeResponse({ ok: false, status: 400, text: "bad" }));
+    globalThis.fetch = mock as unknown as typeof fetch;
+
+    await expect(
+      sendToCC(sampleBody(), { apiBase: "https://example.test", apiKey: "k", ccVersion: "0.0.0" }),
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(mock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up after exhausting retries on persistent 5xx", async () => {
+    const mock = vi
+      .fn()
+      .mockResolvedValue(fakeResponse({ ok: false, status: 502, text: "bad gw" }));
+    globalThis.fetch = mock as unknown as typeof fetch;
+
+    await expect(
+      sendToCC(sampleBody(), { apiBase: "https://example.test", apiKey: "k", ccVersion: "0.0.0" }),
+    ).rejects.toBeInstanceOf(UpstreamError);
+    // 1 initial + 2 retries = 3 attempts.
+    expect(mock).toHaveBeenCalledTimes(3);
   });
 });

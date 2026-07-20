@@ -1,4 +1,3 @@
-import { Transform, type TransformCallback } from "node:stream";
 import type { CCEvent } from "@/translate/types.js";
 
 /**
@@ -42,54 +41,6 @@ export function parseCCLine(line: string): ParsedChunk {
   } catch {
     // If we can't parse as JSON, it might be a ping or keepalive
     return { type: "ping" };
-  }
-}
-
-/**
- * Node.js Transform stream that takes raw NDJSON buffer chunks from the CC API
- * and emits parsed CCEvent objects.
- *
- * Usage:
- *   ccStream.pipe(ndjsonParser)
- *   ndjsonParser.on('data', (event: CCEvent) => { ... })
- *   ndjsonParser.on('error', (err) => { ... })
- *   ndjsonParser.on('end', () => { ... })
- */
-export class NDJSONParser extends Transform {
-  private buffer = "";
-
-  constructor() {
-    super({ readableObjectMode: true, writableObjectMode: false });
-  }
-
-  _transform(chunk: Buffer, _encoding: BufferEncoding, callback: TransformCallback): void {
-    this.buffer += chunk.toString("utf-8");
-    const lines = this.buffer.split("\n");
-    // Keep the last (possibly incomplete) line in the buffer
-    this.buffer = lines.pop() ?? "";
-
-    for (const line of lines) {
-      const result = parseCCLine(line);
-      if (result.type === "event" && result.event) {
-        this.push(result.event);
-      } else if (result.type === "done") {
-        // Stream complete, will be handled by 'end' event
-        continue;
-      }
-    }
-
-    callback();
-  }
-
-  _flush(callback: TransformCallback): void {
-    // Process any remaining data in buffer
-    if (this.buffer.trim()) {
-      const result = parseCCLine(this.buffer);
-      if (result.type === "event" && result.event) {
-        this.push(result.event);
-      }
-    }
-    callback();
   }
 }
 

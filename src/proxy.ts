@@ -89,11 +89,25 @@ server.listen(config.port, config.host, () => {
   console.log("  Press Ctrl+C to stop\n");
 });
 
-process.on("SIGINT", () => {
-  console.log("\n  Shutting down...");
-  server.close(() => process.exit(0));
+// Never let an unexpected async error crash the proxy silently — log and keep
+// serving. (Route handlers already catch their own errors; this is a backstop.)
+process.on("unhandledRejection", (reason) => {
+  logger.error("[fatal] Unhandled promise rejection:", reason);
+});
+process.on("uncaughtException", (err) => {
+  logger.error("[fatal] Uncaught exception:", err);
 });
 
-process.on("SIGTERM", () => {
+const shutdown = (signal: string): void => {
+  logger.info(`Received ${signal}, shutting down...`);
+  // Don't hang forever waiting on a stuck streaming connection.
+  const force = setTimeout(() => {
+    logger.warn("Forcing shutdown after 10s timeout");
+    process.exit(1);
+  }, 10_000);
+  force.unref();
   server.close(() => process.exit(0));
-});
+};
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
