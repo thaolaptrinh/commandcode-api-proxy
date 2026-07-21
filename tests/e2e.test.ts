@@ -137,6 +137,43 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     expect(finishChunk.choices[0].finish_reason).toBe("stop");
   });
 
+  // Regression: when the upstream stream ends without a `finish` event
+  // (network drop, CC restart mid-tool-call), the proxy must synthesize a
+  // finish_reason chunk so the OpenAI SDK sees a well-formed end-of-stream
+  // instead of an abruptly truncated response.
+  it("streaming: synthesizes a finish chunk when upstream ends without finish", async () => {
+    const truncatedEvents: CCEvent[] = [
+      { type: "start", data: {} },
+      { type: "text-delta", data: { text: "partial response" } },
+      // NO finish event — simulates upstream connection drop
+    ];
+    sendToCCSpy.mockResolvedValue({ stream: Readable.from(truncatedEvents) });
+
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-key",
+      },
+      body: JSON.stringify({
+        model: "deepseek/deepseek-v4-flash",
+        messages: [{ role: "user", content: "Hi" }],
+        stream: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    // Even with no upstream finish, the proxy must close the SSE stream
+    // cleanly with a synthesized finish_reason and the [DONE] sentinel.
+    expect(text).toContain("[DONE]");
+    const lines = text.split("\n").filter((l) => l.startsWith("data: ") && !l.includes("[DONE]"));
+    const parsed = lines.map((l) => JSON.parse(l.replace("data: ", "")));
+    const finishChunk = parsed.find((c) => c.choices?.[0]?.finish_reason);
+    expect(finishChunk).toBeDefined();
+    expect(finishChunk.choices[0].finish_reason).toBe("stop");
+  });
+
   it("returns 400 for invalid JSON body", async () => {
     const res = await fetch(`${baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -149,6 +186,40 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     expect(res.status).toBe(400);
     const body = (await res.json()) as any;
     expect(body.error.message).toBe("Invalid JSON body");
+  });
+
+  // Regression: an upstream `error` event already emits a terminal chunk with
+  // finish_reason:"stop". The server MUST NOT synthesize a second finish
+  // chunk on stream end (which would emit duplicate finish_reason chunks).
+  it("streaming: upstream error event does not produce duplicate finish chunks", async () => {
+    const errorEvents: CCEvent[] = [
+      { type: "start", data: {} },
+      { type: "error", data: { message: "CC upstream exploded" } },
+      // No finish event; stream just ends after the error.
+    ];
+    sendToCCSpy.mockResolvedValue({ stream: Readable.from(errorEvents) });
+
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-key",
+      },
+      body: JSON.stringify({
+        model: "deepseek/deepseek-v4-flash",
+        messages: [{ role: "user", content: "Hi" }],
+        stream: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toContain("[DONE]");
+    const lines = text.split("\n").filter((l) => l.startsWith("data: ") && !l.includes("[DONE]"));
+    const parsed = lines.map((l) => JSON.parse(l.replace("data: ", "")));
+    // Exactly ONE chunk with finish_reason set (from the error case).
+    const finishChunks = parsed.filter((c) => c.choices?.[0]?.finish_reason);
+    expect(finishChunks).toHaveLength(1);
   });
 });
 
@@ -305,6 +376,72 @@ describe("E2E: Anthropic /v1/messages", () => {
     expect(text).toContain("event: content_block_stop");
     expect(text).toContain("event: message_delta");
     expect(text).toContain("event: message_stop");
+  });
+
+  // Regression: when the upstream stream ends without a `finish` event
+  // (network drop, CC restart mid-tool-call), the proxy must synthesize the
+  // closing message_delta + message_stop so the Anthropic SDK sees a
+  // well-formed end-of-stream instead of a truncated response.
+  it("streaming: synthesizes message_stop when upstream ends without finish", async () => {
+    const truncatedEvents: CCEvent[] = [
+      { type: "start", data: {} },
+      { type: "text-delta", data: { text: "partial" } },
+      // NO finish event — simulates upstream connection drop
+    ];
+    sendToCCSpy.mockResolvedValue({ stream: Readable.from(truncatedEvents) });
+
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "test-key",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "Hi" }],
+        stream: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    // Even with no upstream finish, the proxy must close the SSE stream
+    // cleanly with a synthesized message_delta + message_stop.
+    expect(text).toContain("event: message_start");
+    expect(text).toContain("event: message_delta");
+    expect(text).toContain("event: message_stop");
+    expect(text).toContain('"stop_reason"');
+  });
+
+  // Regression: an upstream `error` event already emits message_stop. The
+  // server MUST NOT synthesize a second one (Anthropic SDK throws on
+  // duplicate message_stop events).
+  it("streaming: upstream error event does not produce duplicate message_stop", async () => {
+    const errorEvents: CCEvent[] = [
+      { type: "start", data: {} },
+      { type: "error", data: { message: "CC upstream exploded" } },
+    ];
+    sendToCCSpy.mockResolvedValue({ stream: Readable.from(errorEvents) });
+
+    const res = await fetch(`${baseUrl}/v1/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": "test-key",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-5-20250929",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "Hi" }],
+        stream: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const stopCount = (text.match(/event: message_stop/g) ?? []).length;
+    expect(stopCount).toBe(1);
   });
 
   it("returns 400 for invalid JSON body with Anthropic error shape", async () => {

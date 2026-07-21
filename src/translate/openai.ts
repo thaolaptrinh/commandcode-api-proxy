@@ -221,10 +221,36 @@ export class OpenAIStreamEncoder {
   readonly id: string;
   private readonly created: number;
   private toolCallIndex = 0;
+  private sawFinish = false;
+  // Map a CC toolCallId to the OpenAI streaming `index` we assigned it.
+  // Without this, parallel tool-call-delta streams without an explicit
+  // `index` field would all be assigned index 0 and the client would merge
+  // them into a single tool call.
+  private readonly toolCallIdToIndex = new Map<string, number>();
 
   constructor(private readonly model: string) {
     this.id = crypto.randomUUID();
     this.created = Math.floor(Date.now() / 1000);
+  }
+
+  get finished(): boolean {
+    return this.sawFinish;
+  }
+
+  /**
+   * Resolve the OpenAI streaming `index` for a given tool-call id, allocating
+   * a new one on first sighting. Falls back to the upstream-provided index
+   * (if any) so we don't fight a bridge that already numbers them.
+   */
+  private resolveToolCallIndex(toolCallId: string | undefined, upstreamIndex: number | undefined): number {
+    if (toolCallId) {
+      const known = this.toolCallIdToIndex.get(toolCallId);
+      if (known !== undefined) return known;
+      const idx = upstreamIndex ?? this.toolCallIndex++;
+      this.toolCallIdToIndex.set(toolCallId, idx);
+      return idx;
+    }
+    return upstreamIndex ?? this.toolCallIndex++;
   }
 
   emit(event: CCEvent): object[] {
@@ -274,17 +300,19 @@ export class OpenAIStreamEncoder {
       }
 
       case "tool-call-delta": {
+        const toolCallId = (event.data.toolCallId as string) ?? undefined;
+        const upstreamIndex = (event.data.index as number) ?? undefined;
         const tc: {
           index: number;
           id?: string;
           type?: string;
           function: { name?: string; arguments: string };
         } = {
-          index: (event.data.index as number) ?? 0,
+          index: this.resolveToolCallIndex(toolCallId, upstreamIndex),
           function: { arguments: (event.data.arguments as string) ?? "" },
         };
-        if (event.data.toolCallId) {
-          tc.id = event.data.toolCallId as string;
+        if (toolCallId) {
+          tc.id = toolCallId;
           tc.type = "function";
         }
         if (event.data.name) {
@@ -305,6 +333,13 @@ export class OpenAIStreamEncoder {
         const toolName = (event.data.toolName as string) ?? (event.data.name as string) ?? "";
         const input = event.data.input ?? event.data.arguments;
         const args = typeof input === "string" ? input : input != null ? JSON.stringify(input) : "";
+        // Reuse the index allocated by any prior tool-call-delta for this id
+        // so the client merges the final tool-call with the streamed deltas
+        // instead of seeing it as a brand-new tool call.
+        const index = this.resolveToolCallIndex(
+          toolCallId || undefined,
+          (event.data.index as number) ?? undefined,
+        );
         chunks.push({
           id,
           object: "chat.completion.chunk",
@@ -316,7 +351,7 @@ export class OpenAIStreamEncoder {
               delta: {
                 tool_calls: [
                   {
-                    index: this.toolCallIndex++,
+                    index,
                     id: toolCallId,
                     type: "function",
                     function: { name: toolName, arguments: args },
@@ -331,6 +366,7 @@ export class OpenAIStreamEncoder {
       }
 
       case "finish": {
+        this.sawFinish = true;
         const usage = extractUsage(event.data as Record<string, unknown>);
         const finishReason = (event.data.finishReason as string) ?? "stop";
         chunks.push({
@@ -356,6 +392,7 @@ export class OpenAIStreamEncoder {
       }
 
       case "error": {
+        this.sawFinish = true;
         const errMsg =
           (event.data.message as string) ??
           (event.data.error as { message?: string } | undefined)?.message ??
@@ -391,6 +428,24 @@ export class OpenAIStreamEncoder {
         type: "upstream_error",
       },
     };
+  }
+
+  /**
+   * Build the closing chunks for a stream that ended without a `finish`
+   * event from the upstream (e.g. upstream connection dropped mid-response).
+   * Emits a synthetic finish_reason so the client SDK doesn't see a
+   * truncated response.
+   */
+  finishChunks(reason: string = "stop"): object[] {
+    return [
+      {
+        id: this.id,
+        object: "chat.completion.chunk",
+        created: this.created,
+        model: this.model,
+        choices: [{ index: 0, delta: {}, finish_reason: reason }],
+      },
+    ];
   }
 }
 

@@ -18,7 +18,7 @@ import {
   validateAnthropicRequest,
   ValidationError,
 } from "@/translate/validation.js";
-import type { AnthropicRequest } from "@/translate/anthropic-types.js";
+import type { AnthropicRequest, AnthropicSSERecord } from "@/translate/anthropic-types.js";
 
 // ──────────────────────────────────────────
 // Mutable server state
@@ -176,6 +176,60 @@ function destroyStreamOnClientDisconnect(
   req.on("close", () => (stream as Readable).destroy());
 }
 
+/**
+ * Write a chunk to `res`, returning a Promise that resolves once the
+ * underlying socket has drained (when backpressure applies). Returns
+ * `false` if the response is no longer writable.
+ */
+function writeSSE(res: http.ServerResponse, chunk: string): Promise<boolean> {
+  if (res.writableEnded || res.destroyed) return Promise.resolve(false);
+  if (res.write(chunk)) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    res.once("drain", () => resolve(!res.writableEnded && !res.destroyed));
+  });
+}
+
+/**
+ * Drive the upstream CC stream through `encoder`, writing formatted SSE
+ * records to `res`. Applies client-side backpressure (pauses the upstream
+ * when `res` buffers fill), and isolates encoder errors so they terminate
+ * the stream cleanly instead of crashing the process.
+ */
+async function pumpStream(
+  stream: NodeJS.ReadableStream,
+  res: http.ServerResponse,
+  encode: (event: CCEvent) => string[],
+  onEnd: () => string[],
+  onError: (err: Error) => string[],
+): Promise<void> {
+  const writable = (chunk: string): Promise<boolean> => writeSSE(res, chunk);
+
+  try {
+    for await (const event of stream) {
+      let chunks: string[];
+      try {
+        chunks = encode(event as unknown as CCEvent);
+      } catch (err) {
+        // Encoder blew up — turn it into a stream error so the catch below
+        // handles it uniformly instead of crashing the proxy.
+        (stream as Readable).destroy(err as Error);
+        break;
+      }
+      for (const chunk of chunks) {
+        if (!(await writable(chunk))) return;
+      }
+    }
+    for (const chunk of onEnd()) {
+      if (!(await writable(chunk))) return;
+    }
+  } catch (err) {
+    logger.error("[stream] upstream streaming error:", (err as Error).message);
+    for (const chunk of onError(err as Error)) {
+      if (!(await writable(chunk))) return;
+    }
+  }
+}
+
 // ──────────────────────────────────────────
 // Route handlers
 // ──────────────────────────────────────────
@@ -288,25 +342,28 @@ async function handleChatCompletions(
         ...corsHeaders(),
       });
 
-      stream.on("data", (event: CCEvent) => {
-        for (const chunk of encoder.emit(event)) {
-          res.write(formatSSE(chunk));
-        }
-      });
-      stream.on("end", () => {
+      await pumpStream(
+        stream,
+        res,
+        (event) => encoder.emit(event).map((c) => formatSSE(c)),
+        () =>
+          encoder.finished
+            ? []
+            : encoder.finishChunks("stop").map((c) => formatSSE(c)),
+        (err) => {
+          const chunks: object[] = [encoder.errorChunk(err)];
+          if (!encoder.finished) chunks.push(...encoder.finishChunks("stop"));
+          return chunks.map((c) => formatSSE(c));
+        },
+      );
+      // After pump completes, emit the [DONE] sentinel if we still can.
+      if (!res.writableEnded) {
         res.write(formatSSEDone());
         res.end();
-      });
-      stream.on("error", (err: Error) => {
-        logger.error("[stream] OpenAI streaming error:", err.message);
-        if (!res.destroyed) {
-          res.write(formatSSE(encoder.errorChunk(err)));
-          res.write(formatSSEDone());
-          res.end();
-        }
-      });
+      }
       destroyStreamOnClientDisconnect(req, stream);
     } else {
+      destroyStreamOnClientDisconnect(req, stream);
       const events = await collectEvents(stream);
       const response = buildNonStreamingResponse(events, model, encoder.id);
       sendJson(res, 200, response);
@@ -370,26 +427,31 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
         ...corsHeaders(),
       });
 
-      stream.on("data", (event: CCEvent) => {
-        for (const record of encoder.emit(event)) {
-          res.write(formatAnthropicSSE(record.event, record.data));
-        }
-      });
-      stream.on("end", () => res.end());
-      stream.on("error", (err: Error) => {
-        logger.error("[stream] Anthropic streaming error:", err.message);
-        if (!res.destroyed) {
-          res.write(
-            formatAnthropicSSE("error", {
-              type: "error",
-              error: { type: "api_error", message: err.message },
-            }),
-          );
-          res.end();
-        }
-      });
+      await pumpStream(
+        stream,
+        res,
+        (event) => encoder.emit(event).map((r) => formatAnthropicSSE(r.event, r.data)),
+        () =>
+          encoder.finished
+            ? []
+            : encoder
+                .finishRecords("end_turn")
+                .map((r) => formatAnthropicSSE(r.event, r.data)),
+        (err) => {
+          const records: AnthropicSSERecord[] = [
+            {
+              event: "error",
+              data: { type: "error", error: { type: "api_error", message: err.message } },
+            },
+          ];
+          if (!encoder.finished) records.push(...encoder.finishRecords("end_turn"));
+          return records.map((r) => formatAnthropicSSE(r.event, r.data));
+        },
+      );
+      if (!res.writableEnded) res.end();
       destroyStreamOnClientDisconnect(req, stream);
     } else {
+      destroyStreamOnClientDisconnect(req, stream);
       const events = await collectEvents(stream);
       const response = buildAnthropicResponse(events, model, encoder.messageId);
       res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });

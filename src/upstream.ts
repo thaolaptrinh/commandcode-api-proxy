@@ -216,19 +216,63 @@ function nodeReaderToStream(
 ): NodeJS.ReadableStream {
   const decoder = new TextDecoder();
   let buffer = "";
+  // Lines parsed from the current upstream chunk that haven't been pushed yet.
+  // Kept in closure scope so backpressure mid-chunk doesn't drop them: when
+  // push() returns false we return out of read(), and resume here on the next
+  // read() call instead of starting a fresh reader.read().
+  let pendingLines: string[] = [];
+  let upstreamDone = false;
+  let readerReleased = false;
+
+  // Release the underlying reader when the consumer destroys this stream
+  // (e.g. client disconnected). Otherwise CC keeps generating tokens nobody
+  // will read, burning the user's quota until upstream's own timeout fires.
+  const releaseReader = (): void => {
+    if (readerReleased) return;
+    readerReleased = true;
+    const cancel = (reader as { cancel?: () => Promise<void> }).cancel;
+    if (typeof cancel === "function") {
+      cancel.call(reader).catch(() => {
+        /* already closed */
+      });
+    }
+  };
 
   return new Readable({
     objectMode: true,
+    emitClose: true,
+    destroy(err, cb) {
+      releaseReader();
+      cb(err);
+    },
     async read() {
       try {
         while (true) {
+          // Drain anything left over from a previous chunk that was
+          // interrupted by backpressure before we read more from upstream.
+          while (pendingLines.length > 0) {
+            const line = pendingLines.shift() as string;
+            const result = parseCCLine(line);
+            if (result.type === "event" && result.event) {
+              if (!this.push(result.event)) return; // still backpressured
+            }
+          }
+
+          if (upstreamDone) {
+            this.push(null);
+            return;
+          }
+
           const { done, value } = await reader.read();
           if (done) {
-            // Flush remaining buffer
+            upstreamDone = true;
+            releaseReader();
+            // Flush trailing partial line (no newline terminator).
             if (buffer.trim()) {
               const result = parseCCLine(buffer);
+              buffer = "";
               if (result.type === "event" && result.event) {
-                this.push(result.event);
+                if (!this.push(result.event)) return; // backpressured; null next read
               }
             }
             this.push(null);
@@ -237,17 +281,12 @@ function nodeReaderToStream(
 
           buffer += decoder.decode(value, { stream: true });
           const lines = buffer.split("\n");
+          // Last segment is the partial line awaiting its newline; keep it.
           buffer = lines.pop() ?? "";
-
-          for (const line of lines) {
-            const result = parseCCLine(line);
-            if (result.type === "event" && result.event) {
-              const canContinue = this.push(result.event);
-              if (!canContinue) return;
-            }
-          }
+          pendingLines = lines;
         }
       } catch (err) {
+        releaseReader();
         this.destroy(err as Error);
       }
     },

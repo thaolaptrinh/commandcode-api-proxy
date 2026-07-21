@@ -164,4 +164,90 @@ describe("sendToCC retry", () => {
     // 1 initial + 2 retries = 3 attempts.
     expect(mock).toHaveBeenCalledTimes(3);
   });
+
+  // Regression: when a single upstream chunk carries many NDJSON lines and the
+  // consumer applies backpressure (push() returns false), the proxy used to
+  // drop all remaining lines in that chunk. Tool-call deltas typically arrive
+  // bundled this way, so the symptom was "tool calls truncated mid-stream".
+  it("does not drop events when the consumer applies backpressure", async () => {
+    // 50 events packed into ONE upstream chunk.
+    const bodyLines: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      bodyLines.push(JSON.stringify({ type: "text-delta", data: { text: `t${i}` } }) + "\n");
+    }
+    bodyLines.push(JSON.stringify({ type: "finish", data: { finishReason: "stop" } }) + "\n");
+
+    const mock = vi.fn().mockResolvedValue(
+      fakeResponse({ ok: true, status: 200, bodyLines }),
+    );
+    globalThis.fetch = mock as unknown as typeof fetch;
+
+    const { stream } = await sendToCC(sampleBody(), {
+      apiBase: "https://example.test",
+      apiKey: "k",
+      ccVersion: "0.0.0",
+    });
+
+    // Consume slowly to force the Readable's internal buffer to fill.
+    // pause()/resume() gives us deterministic backpressure.
+    const events: CCEvent[] = [];
+    stream.on("data", (e: CCEvent) => events.push(e));
+    (stream as Readable).pause();
+
+    // Allow a tick for the producer to attempt stuffing the internal buffer.
+    await new Promise((r) => setImmediate(r));
+    (stream as Readable).resume();
+    await new Promise<void>((resolve) => stream.on("end", () => resolve()));
+
+    const textDeltas = events.filter((e) => e.type === "text-delta");
+    expect(textDeltas.length).toBe(50);
+    // First and last deltas specifically — these are the ones most likely to
+    // be lost at the boundary.
+    expect(textDeltas[0].data.text).toBe("t0");
+    expect(textDeltas[49].data.text).toBe("t49");
+    expect(events.some((e) => e.type === "finish")).toBe(true);
+  });
+
+  // Regression: when the consumer stream is destroyed (client disconnect),
+  // the underlying upstream reader must be cancelled so the upstream TCP
+  // connection closes and CC stops generating tokens nobody will read.
+  it("cancels the upstream reader when the consumer is destroyed", async () => {
+    // Reader fake that supports cancel() and produces an unbounded stream.
+    const enc = new TextEncoder();
+    let cancelCalled = false;
+    const reader = {
+      read: async () => ({
+        done: false,
+        value: enc.encode('{"type":"text-delta","data":{"text":"x"}}\n'),
+      }),
+      cancel: async () => {
+        cancelCalled = true;
+      },
+    };
+    const mock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "",
+      text: async () => "",
+      body: { getReader: () => reader },
+    } as unknown as Response);
+    globalThis.fetch = mock as unknown as typeof fetch;
+
+    const { stream } = await sendToCC(sampleBody(), {
+      apiBase: "https://example.test",
+      apiKey: "k",
+      ccVersion: "0.0.0",
+    });
+
+    // Read one event so the producer is up, then destroy (client disconnect).
+    await new Promise<void>((resolve) => {
+      stream.once("data", () => {
+        (stream as Readable).destroy();
+        resolve();
+      });
+    });
+
+    // cancel() is called synchronously from destroy().
+    expect(cancelCalled).toBe(true);
+  });
 });

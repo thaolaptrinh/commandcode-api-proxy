@@ -249,9 +249,14 @@ export class AnthropicStreamEncoder {
   private pendingStart: CCEvent | null = null;
   private started = false;
   private pinged = false;
+  private sawFinish = false;
 
   constructor(private readonly model: string) {
     this.messageId = `msg_${crypto.randomUUID()}`;
+  }
+
+  get finished(): boolean {
+    return this.sawFinish;
   }
 
   emit(event: CCEvent): AnthropicSSERecord[] {
@@ -263,6 +268,7 @@ export class AnthropicStreamEncoder {
     }
 
     if (event.type === "error") {
+      this.sawFinish = true;
       const msg =
         (event.data.message as string) ??
         (event.data.error as { message?: string } | undefined)?.message ??
@@ -308,6 +314,7 @@ export class AnthropicStreamEncoder {
   }
 
   private handleFinish(event: CCEvent): AnthropicSSERecord[] {
+    this.sawFinish = true;
     const records: AnthropicSSERecord[] = [];
 
     this.closeCurrentBlock(records);
@@ -389,6 +396,15 @@ export class AnthropicStreamEncoder {
         const input = event.data.input ?? event.data.arguments;
         const argsStr =
           typeof input === "string" ? input : input != null ? JSON.stringify(input) : "";
+        // If the upstream streamed deltas for this tool call first and then
+        // sent the final `tool-call` event with the same id, reuse the block
+        // it already opened instead of creating a duplicate `tool_use`.
+        if (this.currentBlockType === "tool_use" && this.currentToolCallId === tcId) {
+          if (argsStr) {
+            records.push(this.makeDelta({ type: "input_json_delta", partial_json: argsStr }));
+          }
+          break;
+        }
         this.closeCurrentBlock(records);
         this.ensureBlockOpenWith(records, "tool_use", {
           type: "tool_use",
@@ -488,6 +504,31 @@ export class AnthropicStreamEncoder {
         },
       },
     };
+  }
+
+  /**
+   * Build the closing records for a stream that ended without a `finish`
+   * event from the upstream (e.g. upstream connection dropped mid-response).
+   * Emits synthetic message_delta + message_stop so the Anthropic SDK sees
+   * a well-formed end-of-stream instead of a truncated response.
+   */
+  finishRecords(stopReason: AnthropicStopReason = "end_turn"): AnthropicSSERecord[] {
+    const records: AnthropicSSERecord[] = [];
+    if (!this.started) {
+      records.push(this.makeMessageStart(0));
+      this.started = true;
+    }
+    this.closeCurrentBlock(records);
+    records.push({
+      event: "message_delta",
+      data: {
+        type: "message_delta",
+        delta: { stop_reason: stopReason, stop_sequence: null },
+        usage: { input_tokens: 0, output_tokens: 0 },
+      },
+    });
+    records.push({ event: "message_stop", data: {} });
+    return records;
   }
 }
 

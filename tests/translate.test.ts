@@ -338,6 +338,61 @@ describe("OpenAIStreamEncoder", () => {
       expect((chunks[0] as any).choices[0].finish_reason).toBe(to);
     }
   });
+
+  // Regression: error events emit a finish_reason chunk but must also flip
+  // `finished` to true, otherwise the server would synthesize ANOTHER
+  // finish chunk on stream end and the client would see a duplicate.
+  it("marks the encoder as finished after an error event", () => {
+    expect(encoder.finished).toBe(false);
+    encoder.emit({ type: "error", data: { message: "boom" } });
+    expect(encoder.finished).toBe(true);
+  });
+
+  // Regression: parallel tool-call-delta streams without an explicit `index`
+  // would all be assigned index 0 and the client would merge them into a
+  // single tool call. Each toolCallId must get its own stable index.
+  it("assigns stable tool-call indices per toolCallId", () => {
+    encoder.emit({ type: "start", data: {} });
+
+    // First tool, two deltas.
+    const a1 = encoder.emit({
+      type: "tool-call-delta",
+      data: { toolCallId: "call_A", name: "search", arguments: "{" },
+    });
+    const a2 = encoder.emit({
+      type: "tool-call-delta",
+      data: { toolCallId: "call_A", arguments: '"q":"hi"}' },
+    });
+    // Second tool, parallel.
+    const b1 = encoder.emit({
+      type: "tool-call-delta",
+      data: { toolCallId: "call_B", name: "calc", arguments: "{}" },
+    });
+
+    const idxA1 = (a1[0] as any).choices[0].delta.tool_calls[0].index;
+    const idxA2 = (a2[0] as any).choices[0].delta.tool_calls[0].index;
+    const idxB1 = (b1[0] as any).choices[0].delta.tool_calls[0].index;
+
+    expect(idxA1).toBe(0);
+    expect(idxA2).toBe(0); // same id → same index
+    expect(idxB1).toBe(1); // different id → new index
+  });
+
+  // Regression: a final `tool-call` event after deltas for the same id must
+  // reuse the index allocated by the deltas so the client merges them.
+  it("tool-call after tool-call-delta for the same id reuses the index", () => {
+    encoder.emit({ type: "start", data: {} });
+    encoder.emit({
+      type: "tool-call-delta",
+      data: { toolCallId: "call_X", name: "search", arguments: '{"q":"a"' },
+    });
+    const finalChunks = encoder.emit({
+      type: "tool-call",
+      data: { toolCallId: "call_X", toolName: "search", input: '{"q":"a"}' },
+    });
+    const idx = (finalChunks[0] as any).choices[0].delta.tool_calls[0].index;
+    expect(idx).toBe(0);
+  });
 });
 
 // ──────────────────────────────────────────

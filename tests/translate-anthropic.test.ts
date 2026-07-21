@@ -404,6 +404,43 @@ describe("AnthropicStreamEncoder", () => {
     );
     expect(events).toContain("content_block_stop");
   });
+
+  // Regression: error events must set `finished` so the server doesn't
+  // synthesize a duplicate message_stop on stream end (Anthropic SDK
+  // throws on a double message_stop).
+  it("marks the encoder as finished after an error event", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    expect(encoder.finished).toBe(false);
+    encoder.emit({ type: "start", data: {} });
+    encoder.emit({ type: "error", data: { message: "boom" } });
+    expect(encoder.finished).toBe(true);
+  });
+
+  // Regression: when CC sends tool-call-delta events followed by a final
+  // tool-call for the same toolCallId, the encoder must reuse the already-
+  // open tool_use block instead of opening a second one (which would
+  // produce duplicate tool_use blocks for the same id).
+  it("tool-call after tool-call-delta for the same id reuses the open block", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    encoder.emit({ type: "start", data: {} });
+
+    // Stream partial args via deltas.
+    const d1 = encoder.emit({
+      type: "tool-call-delta",
+      data: { toolCallId: "tc_X", name: "search", arguments: '{"q":' },
+    });
+    // Final tool-call for the same id.
+    const d2 = encoder.emit({
+      type: "tool-call",
+      data: { toolCallId: "tc_X", toolName: "search", input: { q: "hi" } },
+    });
+
+    const allRecords = [...d1, ...d2];
+    const blockStarts = allRecords.filter((r) => r.event === "content_block_start");
+    // Exactly one tool_use block — not two.
+    expect(blockStarts).toHaveLength(1);
+    expect((blockStarts[0].data.content_block as { type: string }).type).toBe("tool_use");
+  });
 });
 
 describe("buildAnthropicResponse", () => {
