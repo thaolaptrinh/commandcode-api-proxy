@@ -350,6 +350,27 @@ describe("AnthropicStreamEncoder", () => {
     expect(usage.service_tier).toBe("standard");
   });
 
+  // Regression: if CC sends start + finish with no content events in
+  // between (empty response, immediate refusal, max_tokens=0, etc.),
+  // handleFinish must synthesize message_start — the Anthropic SDK
+  // requires message_start as the first event of the stream.
+  it("emits message_start when finish arrives with no prior content", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    encoder.emit({ type: "start", data: {} });
+    const finishRecords = encoder.emit({
+      type: "finish",
+      data: { finishReason: "stop" },
+    });
+    const eventTypes = finishRecords.map((r) => r.event);
+    // message_start must come BEFORE message_delta/message_stop.
+    const msIdx = eventTypes.indexOf("message_start");
+    const mdIdx = eventTypes.indexOf("message_delta");
+    const stopIdx = eventTypes.indexOf("message_stop");
+    expect(msIdx).toBeGreaterThanOrEqual(0);
+    expect(mdIdx).toBeGreaterThan(msIdx);
+    expect(stopIdx).toBeGreaterThan(mdIdx);
+  });
+
   it("two encoders are independent (concurrency fix)", () => {
     const a = new AnthropicStreamEncoder("a");
     const b = new AnthropicStreamEncoder("b");
@@ -404,6 +425,43 @@ describe("AnthropicStreamEncoder", () => {
     );
     expect(events).toContain("content_block_stop");
   });
+
+  // Regression: error events must set `finished` so the server doesn't
+  // synthesize a duplicate message_stop on stream end (Anthropic SDK
+  // throws on a double message_stop).
+  it("marks the encoder as finished after an error event", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    expect(encoder.finished).toBe(false);
+    encoder.emit({ type: "start", data: {} });
+    encoder.emit({ type: "error", data: { message: "boom" } });
+    expect(encoder.finished).toBe(true);
+  });
+
+  // Regression: when CC sends tool-call-delta events followed by a final
+  // tool-call for the same toolCallId, the encoder must reuse the already-
+  // open tool_use block instead of opening a second one (which would
+  // produce duplicate tool_use blocks for the same id).
+  it("tool-call after tool-call-delta for the same id reuses the open block", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    encoder.emit({ type: "start", data: {} });
+
+    // Stream partial args via deltas.
+    const d1 = encoder.emit({
+      type: "tool-call-delta",
+      data: { toolCallId: "tc_X", name: "search", arguments: '{"q":' },
+    });
+    // Final tool-call for the same id.
+    const d2 = encoder.emit({
+      type: "tool-call",
+      data: { toolCallId: "tc_X", toolName: "search", input: { q: "hi" } },
+    });
+
+    const allRecords = [...d1, ...d2];
+    const blockStarts = allRecords.filter((r) => r.event === "content_block_start");
+    // Exactly one tool_use block — not two.
+    expect(blockStarts).toHaveLength(1);
+    expect((blockStarts[0].data.content_block as { type: string }).type).toBe("tool_use");
+  });
 });
 
 describe("buildAnthropicResponse", () => {
@@ -439,9 +497,10 @@ describe("buildAnthropicResponse", () => {
     ];
     const resp = buildAnthropicResponse(events, "m", "id");
     expect(resp.content).toHaveLength(2);
-    expect(resp.content[0].type).toBe("text");
-    expect(resp.content[1].type).toBe("thinking");
-    expect((resp.content[1] as { signature: string }).signature).toBe("_cc_proxy_placeholder");
+    // Thinking must precede text per Anthropic's extended-thinking contract.
+    expect(resp.content[0].type).toBe("thinking");
+    expect(resp.content[1].type).toBe("text");
+    expect((resp.content[0] as { signature: string }).signature).toBe("_cc_proxy_placeholder");
   });
 
   it("includes tool_use blocks (no text means no empty text block)", () => {

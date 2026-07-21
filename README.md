@@ -73,15 +73,17 @@ commandcode-api-proxy auth logout
 
 Equivalent env vars (lower priority than CLI flags):
 
-| Env var          | Description                                                                                                             |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `HOST`           | Bind address                                                                                                            |
-| `PORT`           | Port                                                                                                                    |
-| `CC_API_KEY`     | Command Code API key                                                                                                    |
-| `CC_API_BASE`    | Upstream API base URL                                                                                                   |
-| `CC_CLI_VERSION` | CLI version sent upstream                                                                                               |
-| `LOG_LEVEL`      | Log level (`info`, `debug`, etc.)                                                                                       |
-| `CORS_ORIGIN`    | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
+| Env var                  | Description                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `HOST`                   | Bind address                                                                                                            |
+| `PORT`                   | Port                                                                                                                    |
+| `CC_API_KEY`             | Command Code API key                                                                                                    |
+| `CC_API_BASE`            | Upstream API base URL                                                                                                   |
+| `CC_CLI_VERSION`         | CLI version sent upstream                                                                                               |
+| `CC_UPSTREAM_TIMEOUT_MS` | Max ms for upstream to return response headers + first byte (default `600000` / 10 min). Bump for slow reasoning models |
+| `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams            |
+| `LOG_LEVEL`              | Log level (`info`, `debug`, etc.)                                                                                       |
+| `CORS_ORIGIN`            | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
 
 > **Security:** the proxy forwards your paid Command Code key upstream and
 > accepts any auth token from clients (`proxy-managed`), so it is designed for

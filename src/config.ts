@@ -15,6 +15,10 @@ export interface Config {
   ccVersion: string;
   logLevel: string;
   corsOrigin: string;
+  /** Max wall-clock ms for upstream to send response headers + first byte. */
+  upstreamTimeoutMs: number;
+  /** Max ms between consecutive chunks during streaming. 0 = disabled. */
+  idleTimeoutMs: number;
 }
 
 /**
@@ -86,5 +90,34 @@ export function loadConfig(): Config {
   // empty to disable) before exposing the proxy on a network.
   const corsOrigin = process.env.CORS_ORIGIN ?? "*";
 
-  return { host, port, apiKey, ccApiBase, ccVersion, logLevel, corsOrigin };
+  // Upstream timeouts. The connection timeout covers the wall-clock time
+  // until the upstream returns response headers + first byte — bump it for
+  // slow reasoning models. The idle timeout catches stalled streams where
+  // the upstream opened the connection but stopped sending chunks
+  // mid-response (e.g. tool call hung on the upstream side). Set
+  // CC_IDLE_TIMEOUT_MS=0 to disable idle detection entirely.
+  const upstreamTimeoutMs = parsePositiveInt(
+    process.env.CC_UPSTREAM_TIMEOUT_MS,
+    600_000, // 10 minutes — covers high-effort reasoning models
+  );
+  const idleTimeoutMs = parsePositiveInt(process.env.CC_IDLE_TIMEOUT_MS, 120_000); // 2 minutes
+
+  return {
+    host,
+    port,
+    apiKey,
+    ccApiBase,
+    ccVersion,
+    logLevel,
+    corsOrigin,
+    upstreamTimeoutMs,
+    idleTimeoutMs,
+  };
+}
+
+function parsePositiveInt(raw: string | undefined, fallback: number): number {
+  if (raw == null || raw === "") return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return fallback;
+  return Math.floor(n);
 }
