@@ -30,6 +30,43 @@ describe("loadConfig", () => {
     expect(config.apiKey).toBeNull();
     expect(config.ccApiBase).toBe("https://api.commandcode.ai");
     expect(config.ccVersion).toBe("0.40.3");
+    // Defaults: 10-minute connect, 2-minute idle.
+    expect(config.upstreamTimeoutMs).toBe(600_000);
+    expect(config.idleTimeoutMs).toBe(120_000);
+  });
+
+  it("reads upstream + idle timeouts from env vars", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("CC_UPSTREAM_TIMEOUT_MS", "1800000"); // 30 min
+    vi.stubEnv("CC_IDLE_TIMEOUT_MS", "300000"); // 5 min
+
+    const { loadConfig } = await import("@/config.js");
+    const config = loadConfig();
+
+    expect(config.upstreamTimeoutMs).toBe(1_800_000);
+    expect(config.idleTimeoutMs).toBe(300_000);
+  });
+
+  it("allows disabling the idle timeout by setting it to 0", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("CC_IDLE_TIMEOUT_MS", "0");
+
+    const { loadConfig } = await import("@/config.js");
+    const config = loadConfig();
+
+    expect(config.idleTimeoutMs).toBe(0);
+  });
+
+  it("falls back to defaults on invalid timeout values", async () => {
+    vi.stubEnv("CC_API_KEY", "");
+    vi.stubEnv("CC_UPSTREAM_TIMEOUT_MS", "not-a-number");
+    vi.stubEnv("CC_IDLE_TIMEOUT_MS", "-5");
+
+    const { loadConfig } = await import("@/config.js");
+    const config = loadConfig();
+
+    expect(config.upstreamTimeoutMs).toBe(600_000);
+    expect(config.idleTimeoutMs).toBe(120_000);
   });
 
   it("reads from environment variables", async () => {

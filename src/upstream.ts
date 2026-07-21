@@ -8,7 +8,10 @@ interface UpstreamOptions {
   apiBase: string;
   apiKey: string;
   ccVersion: string;
+  /** Wall-clock timeout for receiving response headers + first byte. */
   timeoutMs?: number;
+  /** Max ms allowed between consecutive data chunks during streaming. */
+  idleTimeoutMs?: number;
 }
 
 /**
@@ -94,7 +97,13 @@ export async function sendToCC(
   options: UpstreamOptions,
   signal?: AbortSignal,
 ): Promise<{ stream: NodeJS.ReadableStream }> {
-  const { apiBase, apiKey, ccVersion, timeoutMs = 300_000 } = options;
+  const {
+    apiBase,
+    apiKey,
+    ccVersion,
+    timeoutMs = 600_000,
+    idleTimeoutMs = 120_000,
+  } = options;
 
   const url = `${apiBase}/alpha/generate`;
   // CC's API is always streaming — force it on so the upstream stays a stream.
@@ -137,7 +146,12 @@ export async function sendToCC(
         throw new UpstreamError("CC API returned no body", 0, true);
       }
 
-      return { stream: nodeReaderToStream(response.body.getReader()) };
+      return {
+        stream: nodeReaderToStream(response.body.getReader(), {
+          idleTimeoutMs,
+          abortSignal: signal,
+        }),
+      };
     } catch (err) {
       clearTimeout(timeout);
       if (err instanceof UpstreamError) throw err;
@@ -213,6 +227,7 @@ function combineSignals(...signals: AbortSignal[]): AbortSignal {
 
 function nodeReaderToStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
+  opts: { idleTimeoutMs?: number; abortSignal?: AbortSignal } = {},
 ): NodeJS.ReadableStream {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -224,10 +239,41 @@ function nodeReaderToStream(
   let upstreamDone = false;
   let readerReleased = false;
 
+  // Idle timeout: detect a stalled upstream (TCP open, no chunks arriving).
+  // Reset on every successful read(). If it fires we abort the reader so
+  // pumpStream's error path synthesizes a clean finish for the client
+  // instead of hanging forever waiting on a dead connection.
+  const idleMs = opts.idleTimeoutMs ?? 0;
+  let idleTimer: NodeJS.Timeout | null = null;
+  const armIdle = (): void => {
+    if (idleMs <= 0) return;
+    disarmIdle();
+    idleTimer = setTimeout(() => {
+      const err = new Error(
+        `CC upstream idle timeout: no data for ${idleMs}ms`,
+      );
+      err.name = "IdleTimeoutError";
+      // Cancel the reader — pending read() will reject with this reason.
+      const cancel = (reader as { cancel?: (reason?: unknown) => Promise<void> }).cancel;
+      if (typeof cancel === "function") {
+        cancel.call(reader, err).catch(() => {});
+      }
+    }, idleMs);
+    // Don't keep the event loop alive just for the idle timer.
+    idleTimer.unref?.();
+  };
+  const disarmIdle = (): void => {
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+  };
+
   // Release the underlying reader when the consumer destroys this stream
   // (e.g. client disconnected). Otherwise CC keeps generating tokens nobody
   // will read, burning the user's quota until upstream's own timeout fires.
   const releaseReader = (): void => {
+    disarmIdle();
     if (readerReleased) return;
     readerReleased = true;
     const cancel = (reader as { cancel?: () => Promise<void> }).cancel;
@@ -238,7 +284,7 @@ function nodeReaderToStream(
     }
   };
 
-  return new Readable({
+  const stream = new Readable({
     objectMode: true,
     emitClose: true,
     destroy(err, cb) {
@@ -263,7 +309,9 @@ function nodeReaderToStream(
             return;
           }
 
+          armIdle();
           const { done, value } = await reader.read();
+          disarmIdle();
           if (done) {
             upstreamDone = true;
             releaseReader();
@@ -291,4 +339,24 @@ function nodeReaderToStream(
       }
     },
   });
+
+  // If the caller aborts (client disconnect), make sure a pending read()
+  // wakes up. The reader.cancel() in destroy() handles the converse.
+  if (opts.abortSignal) {
+    const sig = opts.abortSignal;
+    if (sig.aborted) {
+      releaseReader();
+    } else {
+      sig.addEventListener(
+        "abort",
+        () => {
+          disarmIdle();
+          stream.destroy(new Error("Client disconnected"));
+        },
+        { once: true },
+      );
+    }
+  }
+
+  return stream;
 }

@@ -329,6 +329,8 @@ async function handleChatCompletions(
         apiBase: config.ccApiBase,
         apiKey,
         ccVersion: config.ccVersion,
+        timeoutMs: config.upstreamTimeoutMs,
+        idleTimeoutMs: config.idleTimeoutMs,
       },
       abort.signal,
     );
@@ -414,7 +416,13 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
   try {
     const result = await sendToCC(
       ccBody,
-      { apiBase: config.ccApiBase, apiKey, ccVersion: config.ccVersion },
+      {
+        apiBase: config.ccApiBase,
+        apiKey,
+        ccVersion: config.ccVersion,
+        timeoutMs: config.upstreamTimeoutMs,
+        idleTimeoutMs: config.idleTimeoutMs,
+      },
       abort.signal,
     );
     const stream = result.stream;

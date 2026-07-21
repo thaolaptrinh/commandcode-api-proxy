@@ -250,4 +250,98 @@ describe("sendToCC retry", () => {
     // cancel() is called synchronously from destroy().
     expect(cancelCalled).toBe(true);
   });
+
+  // Regression: a stalled upstream (TCP open, no chunks arriving) used to
+  // hang the consumer forever — no idle timeout was wired during streaming.
+  // Now nodeReaderToStream aborts the reader after `idleTimeoutMs` of no data.
+  it("aborts the upstream reader after the idle timeout elapses with no data", async () => {
+    // Reader that never produces data and never returns done.
+    let cancelReason: unknown = undefined;
+    let cancelCallCount = 0;
+    const pendingReadRejectors: Array<(e: unknown) => void> = [];
+    const reader = {
+      // read() never resolves on its own — simulates a stalled upstream.
+      read: () =>
+        new Promise<{ done: boolean; value?: Uint8Array }>((_resolve, reject) => {
+          pendingReadRejectors.push(reject);
+        }),
+      // cancel(reason) rejects the pending read() — matches the
+      // ReadableStreamDefaultReader spec, which propagates the cancel
+      // reason through any in-flight read().
+      cancel: async (reason?: unknown) => {
+        // Only capture the FIRST cancel call's reason — the proxy calls
+        // cancel() again from releaseReader() with no arg, which would
+        // otherwise overwrite our assertion.
+        if (cancelCallCount === 0) cancelReason = reason;
+        cancelCallCount++;
+        for (const reject of pendingReadRejectors.splice(0)) {
+          reject(reason);
+        }
+      },
+    };
+    const mock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "",
+      text: async () => "",
+      body: { getReader: () => reader },
+    } as unknown as Response);
+    globalThis.fetch = mock as unknown as typeof fetch;
+
+    const { stream } = await sendToCC(sampleBody(), {
+      apiBase: "https://example.test",
+      apiKey: "k",
+      ccVersion: "0.0.0",
+      idleTimeoutMs: 50, // very short for the test
+    });
+
+    // Resume so the Readable actually starts calling read() — otherwise the
+    // idle timer never gets a chance to arm.
+    (stream as Readable).resume();
+
+    const error: Error | undefined = await new Promise((resolve) => {
+      stream.once("error", (e: Error) => resolve(e));
+    });
+
+    expect(cancelCallCount).toBeGreaterThan(0);
+    expect((cancelReason as Error)?.name).toBe("IdleTimeoutError");
+    // The stream should surface an error to the consumer so the SSE handler
+    // synthesizes a clean finish instead of hanging the client.
+    expect(error).toBeInstanceOf(Error);
+    expect(error?.message).toContain("idle timeout");
+  });
+
+  // Regression: idle timeout is disabled when idleTimeoutMs=0.
+  it("does not fire idle timeout when idleTimeoutMs is 0", async () => {
+    // Same stalled reader, but idle disabled.
+    const reader = {
+      read: () => new Promise<{ done: boolean; value?: Uint8Array }>(() => {}),
+      cancel: async () => {},
+    };
+    const mock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: "",
+      text: async () => "",
+      body: { getReader: () => reader },
+    } as unknown as Response);
+    globalThis.fetch = mock as unknown as typeof fetch;
+
+    const { stream } = await sendToCC(sampleBody(), {
+      apiBase: "https://example.test",
+      apiKey: "k",
+      ccVersion: "0.0.0",
+      idleTimeoutMs: 0,
+    });
+
+    (stream as Readable).resume();
+
+    // Wait long enough that an idle timer WOULD have fired.
+    const errored = await Promise.race([
+      new Promise<Error>((resolve) => stream.once("error", resolve)),
+      new Promise<undefined>((r) => setTimeout(() => r(undefined), 80)),
+    ]);
+    expect(errored).toBeUndefined();
+    (stream as Readable).destroy();
+  });
 });
