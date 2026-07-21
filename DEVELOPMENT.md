@@ -72,26 +72,6 @@ tests/
 └── e2e.test.ts           # End-to-end integration tests
 ```
 
-## Docker
-
-```bash
-# Build
-docker build -t commandcode-api-proxy .
-
-# Run with env var
-docker run --rm -p 8787:8787 \
-  -e CC_API_KEY=user_xxx \
-  commandcode-api-proxy
-
-# Or mount auth.json
-docker run --rm -p 8787:8787 \
-  -v ~/.config/commandcode-api-proxy:/home/node/.config/commandcode-api-proxy:ro \
-  commandcode-api-proxy
-
-# Using docker compose
-docker compose up -d
-```
-
 ## Tech stack
 
 - **Runtime:** Node.js (zero runtime dependencies)
