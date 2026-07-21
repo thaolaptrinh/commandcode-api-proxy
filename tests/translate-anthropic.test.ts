@@ -350,6 +350,27 @@ describe("AnthropicStreamEncoder", () => {
     expect(usage.service_tier).toBe("standard");
   });
 
+  // Regression: if CC sends start + finish with no content events in
+  // between (empty response, immediate refusal, max_tokens=0, etc.),
+  // handleFinish must synthesize message_start — the Anthropic SDK
+  // requires message_start as the first event of the stream.
+  it("emits message_start when finish arrives with no prior content", () => {
+    const encoder = new AnthropicStreamEncoder("m");
+    encoder.emit({ type: "start", data: {} });
+    const finishRecords = encoder.emit({
+      type: "finish",
+      data: { finishReason: "stop" },
+    });
+    const eventTypes = finishRecords.map((r) => r.event);
+    // message_start must come BEFORE message_delta/message_stop.
+    const msIdx = eventTypes.indexOf("message_start");
+    const mdIdx = eventTypes.indexOf("message_delta");
+    const stopIdx = eventTypes.indexOf("message_stop");
+    expect(msIdx).toBeGreaterThanOrEqual(0);
+    expect(mdIdx).toBeGreaterThan(msIdx);
+    expect(stopIdx).toBeGreaterThan(mdIdx);
+  });
+
   it("two encoders are independent (concurrency fix)", () => {
     const a = new AnthropicStreamEncoder("a");
     const b = new AnthropicStreamEncoder("b");
@@ -476,9 +497,10 @@ describe("buildAnthropicResponse", () => {
     ];
     const resp = buildAnthropicResponse(events, "m", "id");
     expect(resp.content).toHaveLength(2);
-    expect(resp.content[0].type).toBe("text");
-    expect(resp.content[1].type).toBe("thinking");
-    expect((resp.content[1] as { signature: string }).signature).toBe("_cc_proxy_placeholder");
+    // Thinking must precede text per Anthropic's extended-thinking contract.
+    expect(resp.content[0].type).toBe("thinking");
+    expect(resp.content[1].type).toBe("text");
+    expect((resp.content[0] as { signature: string }).signature).toBe("_cc_proxy_placeholder");
   });
 
   it("includes tool_use blocks (no text means no empty text block)", () => {

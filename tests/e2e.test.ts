@@ -221,6 +221,59 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     const finishChunks = parsed.filter((c) => c.choices?.[0]?.finish_reason);
     expect(finishChunks).toHaveLength(1);
   });
+
+  // Regression: a stream-level error (TCP failure, idle timeout, encoder
+  // throw) used to emit a non-chunk `{error:{...}}` envelope alongside a
+  // valid chunk, which some clients parsed as a tool call named "error".
+  // Now pumpStream emits only uniform valid chunks.
+  it("streaming: stream-level error surfaces as a uniform chunk (no out-of-band error envelope)", async () => {
+    // Build a stream that emits one event, then errors out. Attach an
+    // error listener up-front so destroy(err) doesn't trigger Node's
+    // unhandled-exception path (pumpStream's for-await handles the read
+    // rejection, but the bare 'error' event still propagates).
+    const stream = new Readable({ objectMode: true, read() {} });
+    stream.on("error", () => {
+      /* swallowed — pumpStream catches the read() rejection */
+    });
+    process.nextTick(() => {
+      stream.push({ type: "start", data: {} });
+      stream.push({ type: "text-delta", data: { text: "partial" } });
+      stream.destroy(new Error("simulated TCP RST"));
+    });
+    sendToCCSpy.mockResolvedValue({ stream });
+
+    const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer test-key",
+      },
+      body: JSON.stringify({
+        model: "deepseek/deepseek-v4-flash",
+        messages: [{ role: "user", content: "Hi" }],
+        stream: true,
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const lines = text.split("\n").filter((l) => l.startsWith("data: ") && !l.includes("[DONE]"));
+    const parsed = lines.map((l) => JSON.parse(l.replace("data: ", "")));
+    // Every emitted data record must be a valid chat.completion.chunk — no
+    // bare `{error:...}` envelope mixed in.
+    for (const chunk of parsed) {
+      expect(chunk.object).toBe("chat.completion.chunk");
+    }
+    // The error text should appear as delta.content (visible to the user)
+    // and the stream should still terminate with finish_reason:"stop".
+    const errorChunk = parsed.find((c) =>
+      typeof c.choices?.[0]?.delta?.content === "string" &&
+      c.choices[0].delta.content.includes("simulated TCP RST"),
+    );
+    expect(errorChunk).toBeDefined();
+    const finishChunks = parsed.filter((c) => c.choices?.[0]?.finish_reason);
+    expect(finishChunks).toHaveLength(1);
+  });
 });
 
 // ──────────────────────────────────────────

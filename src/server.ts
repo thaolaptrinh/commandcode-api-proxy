@@ -58,6 +58,11 @@ function parseBody(req: http.IncomingMessage): Promise<unknown> {
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
         tooLarge = true;
+        // Tear down the underlying socket so the client stops uploading the
+        // rest of an oversized body. Without this the connection lingers
+        // until the client finishes (or its own timeout fires) — wasting
+        // bandwidth and a request slot.
+        req.destroy();
         reject(new BodyParseError(413, "Request body too large"));
         return;
       }
@@ -352,18 +357,26 @@ async function handleChatCompletions(
           encoder.finished
             ? []
             : encoder.finishChunks("stop").map((c) => formatSSE(c)),
-        (err) => {
-          const chunks: object[] = [encoder.errorChunk(err)];
-          if (!encoder.finished) chunks.push(...encoder.finishChunks("stop"));
-          return chunks.map((c) => formatSSE(c));
-        },
+        // Stream-level error (TCP failure, idle timeout, encoder throw).
+        // Always emit a uniform content+finish chunk pair via streamErrorChunks
+        // — mixing a non-chunk `{error:...}` envelope with valid chunks
+        // confused some clients (treating the envelope as a tool call named
+        // "error", or failing JSON parse).
+        (err) => encoder.streamErrorChunks(err).map((c) => formatSSE(c)),
       );
       // After pump completes, emit the [DONE] sentinel if we still can.
-      if (!res.writableEnded) {
+      // `writableEnded` only flips when end() is called — `res.destroyed`
+      // catches the case where the client disconnected mid-stream and the
+      // socket was torn down underneath us.
+      if (!res.writableEnded && !res.destroyed) {
         res.write(formatSSEDone());
         res.end();
       }
-      destroyStreamOnClientDisconnect(req, stream);
+      // No destroyStreamOnClientDisconnect here — by the time pumpStream
+      // returns the stream has already ended or errored, so the call would
+      // be a no-op. Mid-stream disconnects are handled by the abort signal
+      // (see abortOnClientDisconnect + nodeReaderToStream's abortSignal
+      // listener).
     } else {
       destroyStreamOnClientDisconnect(req, stream);
       const events = await collectEvents(stream);
@@ -456,8 +469,9 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
           return records.map((r) => formatAnthropicSSE(r.event, r.data));
         },
       );
-      if (!res.writableEnded) res.end();
-      destroyStreamOnClientDisconnect(req, stream);
+      if (!res.writableEnded && !res.destroyed) res.end();
+      // No destroyStreamOnClientDisconnect here — see OpenAI streaming path
+      // for rationale (abort signal already covers mid-stream disconnect).
     } else {
       destroyStreamOnClientDisconnect(req, stream);
       const events = await collectEvents(stream);

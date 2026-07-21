@@ -432,6 +432,27 @@ describe("buildNonStreamingResponse", () => {
     expect(resp.choices[0].message.reasoning_content).toBe("thinking");
     expect(resp.choices[0].message.content).toBe("Answer");
   });
+
+  // Regression: when CC streams tool-call-delta * N then a final tool-call
+  // with the same id, the non-streaming builder used to push a duplicate
+  // entry — producing two tool_calls with the same id, which most clients
+  // either dedupe wrongly or call the tool twice.
+  it("merges tool-call-delta + tool-call with the same id into one entry", () => {
+    const events: CCEvent[] = [
+      { type: "start", data: {} },
+      { type: "tool-call-delta", data: { toolCallId: "call_X", name: "search", arguments: '{"q":' } },
+      { type: "tool-call-delta", data: { toolCallId: "call_X", arguments: '"hi"}' } },
+      { type: "tool-call", data: { toolCallId: "call_X", toolName: "search", input: { q: "hi" } } },
+      { type: "finish", data: { finishReason: "tool-call" } },
+    ];
+    const resp = buildNonStreamingResponse(events, "m", "id") as any;
+    const toolCalls = resp.choices[0].message.tool_calls as any[];
+    expect(toolCalls).toHaveLength(1);
+    expect(toolCalls[0].id).toBe("call_X");
+    expect(toolCalls[0].function.name).toBe("search");
+    // Final tool-call payload overrides accumulated deltas.
+    expect(toolCalls[0].function.arguments).toBe('{"q":"hi"}');
+  });
 });
 
 // ──────────────────────────────────────────

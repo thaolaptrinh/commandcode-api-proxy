@@ -393,35 +393,52 @@ export class OpenAIStreamEncoder {
 
       case "error": {
         this.sawFinish = true;
-        const errMsg =
+        return this.errorChunks(
           (event.data.message as string) ??
-          (event.data.error as { message?: string } | undefined)?.message ??
-          JSON.stringify(event.data);
-        logger.error(`[CC upstream error] ${errMsg}`);
-        chunks.push({
-          id,
-          object: "chat.completion.chunk",
-          created,
-          model: this.model,
-          choices: [
-            { index: 0, delta: { content: `[upstream error] ${errMsg}` }, finish_reason: null },
-          ],
-        });
-        chunks.push({
-          id,
-          object: "chat.completion.chunk",
-          created,
-          model: this.model,
-          choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-        });
-        break;
+            (event.data.error as { message?: string } | undefined)?.message ??
+            JSON.stringify(event.data),
+        );
       }
     }
 
     return chunks;
   }
 
+  /**
+   * Build a uniform error→content+finish chunk pair. Used both by `emit()`
+   * for upstream error events and by the server's pumpStream catch for
+   * stream-level errors (TCP failure, idle timeout, encoder throw). Both
+   * paths surface errors as valid chat.completion.chunk records so the
+   * client always sees a uniform stream shape instead of a mix of valid
+   * chunks and an ad-hoc `{error:...}` envelope.
+   */
+  private errorChunks(message: string): object[] {
+    const id = this.id;
+    const created = this.created;
+    logger.error(`[CC upstream error] ${message}`);
+    return [
+      {
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model: this.model,
+        choices: [
+          { index: 0, delta: { content: `[upstream error] ${message}` }, finish_reason: null },
+        ],
+      },
+      {
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model: this.model,
+        choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+      },
+    ];
+  }
+
   errorChunk(err: Error): object {
+    // Retained for backwards-compat with tests; new code should call
+    // errorChunks() instead so the error appears inside a valid chunk.
     return {
       error: {
         message: err.message,
@@ -446,6 +463,15 @@ export class OpenAIStreamEncoder {
         choices: [{ index: 0, delta: {}, finish_reason: reason }],
       },
     ];
+  }
+
+  /**
+   * Public wrapper around errorChunks() for stream-level errors caught by
+   * pumpStream (TCP failure, idle timeout, encoder throw). Emits a uniform
+   * content+finish chunk pair instead of an out-of-band error envelope.
+   */
+  streamErrorChunks(err: Error): object[] {
+    return this.errorChunks(err.message);
   }
 }
 
@@ -489,16 +515,27 @@ export function buildNonStreamingResponse(events: CCEvent[], model: string, id: 
         break;
       }
       case "tool-call": {
+        // CC bridges commonly emit tool-call-delta * N then a final tool-call
+        // with the same id. If we already accumulated args from deltas,
+        // replace that entry with the canonical final payload (matches what
+        // the streaming encoder does). Otherwise this is a one-shot tool
+        // call with no preceding deltas — push it.
+        const id = (event.data.toolCallId as string) ?? "";
         const input = event.data.input ?? event.data.arguments;
-        toolCalls.push({
-          id: (event.data.toolCallId as string) ?? "",
+        const argsStr =
+          typeof input === "string" ? input : input != null ? JSON.stringify(input) : "";
+        const name = (event.data.toolName as string) ?? (event.data.name as string) ?? "";
+        const existingIdx = toolCalls.findIndex((tc) => tc.id === id);
+        const entry: ToolCall = {
+          id,
           type: "function",
-          function: {
-            name: (event.data.toolName as string) ?? (event.data.name as string) ?? "",
-            arguments:
-              typeof input === "string" ? input : input != null ? JSON.stringify(input) : "",
-          },
-        });
+          function: { name, arguments: argsStr },
+        };
+        if (existingIdx >= 0) {
+          toolCalls[existingIdx] = entry;
+        } else {
+          toolCalls.push(entry);
+        }
         break;
       }
       case "finish":

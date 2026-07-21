@@ -223,6 +223,7 @@ export function toCCRequest(
       stream: req.stream ?? false,
       max_tokens: req.max_tokens,
       temperature: req.temperature,
+      top_p: req.top_p,
       stop: req.stop_sequences,
       tools: ccTools,
       tool_choice: resolveToolChoice(req),
@@ -316,6 +317,15 @@ export class AnthropicStreamEncoder {
   private handleFinish(event: CCEvent): AnthropicSSERecord[] {
     this.sawFinish = true;
     const records: AnthropicSSERecord[] = [];
+
+    // If we never emitted a content event, `started` is still false and no
+    // message_start was sent. The Anthropic SDK requires message_start as
+    // the first event — synthesize one before the closing records so we
+    // don't deliver a stream that starts with message_delta.
+    if (!this.started) {
+      records.push(this.makeMessageStart(0));
+      this.started = true;
+    }
 
     this.closeCurrentBlock(records);
 
@@ -567,6 +577,10 @@ export function buildAnthropicResponse(
     }
   }
 
+  // Block ordering follows Anthropic's extended-thinking contract:
+  // thinking blocks must precede the text they reason about, and tool_use
+  // blocks come last. Mixing this up confuses strict clients (Claude Code
+  // uses thinking-block position to continue reasoning across turns).
   const content: OutputContentBlock[] = [];
   if (thinkingContent) {
     content.push({
@@ -575,10 +589,12 @@ export function buildAnthropicResponse(
       signature: "_cc_proxy_placeholder",
     });
   }
+  if (textContent) content.push({ type: "text", text: textContent });
   content.push(...toolUseBlocks);
-  if (textContent || content.length === 0) {
-    content.unshift({ type: "text", text: textContent });
-  }
+  // Anthropic requires content to be non-empty — if there was no text, no
+  // thinking, and no tool calls (e.g. empty refusal), synthesize an empty
+  // text block rather than sending an empty array.
+  if (content.length === 0) content.push({ type: "text", text: "" });
 
   const finishEvent = events.find((e) => e.type === "finish");
   const finishReason = (finishEvent?.data.finishReason as string) ?? "stop";
