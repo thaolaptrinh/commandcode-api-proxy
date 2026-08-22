@@ -177,9 +177,7 @@ describe("sendToCC retry", () => {
     }
     bodyLines.push(JSON.stringify({ type: "finish", data: { finishReason: "stop" } }) + "\n");
 
-    const mock = vi.fn().mockResolvedValue(
-      fakeResponse({ ok: true, status: 200, bodyLines }),
-    );
+    const mock = vi.fn().mockResolvedValue(fakeResponse({ ok: true, status: 200, bodyLines }));
     globalThis.fetch = mock as unknown as typeof fetch;
 
     const { stream } = await sendToCC(sampleBody(), {

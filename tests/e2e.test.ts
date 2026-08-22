@@ -266,9 +266,10 @@ describe("E2E: OpenAI /v1/chat/completions", () => {
     }
     // The error text should appear as delta.content (visible to the user)
     // and the stream should still terminate with finish_reason:"stop".
-    const errorChunk = parsed.find((c) =>
-      typeof c.choices?.[0]?.delta?.content === "string" &&
-      c.choices[0].delta.content.includes("simulated TCP RST"),
+    const errorChunk = parsed.find(
+      (c) =>
+        typeof c.choices?.[0]?.delta?.content === "string" &&
+        c.choices[0].delta.content.includes("simulated TCP RST"),
     );
     expect(errorChunk).toBeDefined();
     const finishChunks = parsed.filter((c) => c.choices?.[0]?.finish_reason);

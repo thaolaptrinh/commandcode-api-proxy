@@ -81,7 +81,7 @@ Equivalent env vars (lower priority than CLI flags):
 | `CC_API_BASE`            | Upstream API base URL                                                                                                   |
 | `CC_CLI_VERSION`         | CLI version sent upstream                                                                                               |
 | `CC_UPSTREAM_TIMEOUT_MS` | Max ms for upstream to return response headers + first byte (default `600000` / 10 min). Bump for slow reasoning models |
-| `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams            |
+| `CC_IDLE_TIMEOUT_MS`     | Max ms between consecutive stream chunks (default `120000` / 2 min). `0` disables — detects stalled upstreams           |
 | `LOG_LEVEL`              | Log level (`info`, `debug`, etc.)                                                                                       |
 | `CORS_ORIGIN`            | `Access-Control-Allow-Origin` value. `*` by default; empty string disables CORS. Restrict before exposing on a network. |
 

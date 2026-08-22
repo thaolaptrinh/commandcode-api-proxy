@@ -97,13 +97,7 @@ export async function sendToCC(
   options: UpstreamOptions,
   signal?: AbortSignal,
 ): Promise<{ stream: NodeJS.ReadableStream }> {
-  const {
-    apiBase,
-    apiKey,
-    ccVersion,
-    timeoutMs = 600_000,
-    idleTimeoutMs = 120_000,
-  } = options;
+  const { apiBase, apiKey, ccVersion, timeoutMs = 600_000, idleTimeoutMs = 120_000 } = options;
 
   const url = `${apiBase}/alpha/generate`;
   // CC's API is always streaming — force it on so the upstream stays a stream.
@@ -249,9 +243,7 @@ function nodeReaderToStream(
     if (idleMs <= 0) return;
     disarmIdle();
     idleTimer = setTimeout(() => {
-      const err = new Error(
-        `CC upstream idle timeout: no data for ${idleMs}ms`,
-      );
+      const err = new Error(`CC upstream idle timeout: no data for ${idleMs}ms`);
       err.name = "IdleTimeoutError";
       // Cancel the reader — pending read() will reject with this reason.
       const cancel = (reader as { cancel?: (reason?: unknown) => Promise<void> }).cancel;
