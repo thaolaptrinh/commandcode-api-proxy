@@ -13,6 +13,7 @@ import type { CCEvent } from "@/translate/types.js";
 import { formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
 import { logger } from "@/logger.js";
+import { getProxyVersion } from "@/version.js";
 import {
   validateOpenAIChatRequest,
   validateAnthropicRequest,
@@ -242,7 +243,7 @@ async function pumpStream(
 function handleHealth(_req: http.IncomingMessage, res: http.ServerResponse): void {
   sendJson(res, 200, {
     status: "ok",
-    version: process.env.npm_package_version ?? "0.1.0",
+    version: getProxyVersion(),
   });
 }
 
@@ -353,10 +354,7 @@ async function handleChatCompletions(
         stream,
         res,
         (event) => encoder.emit(event).map((c) => formatSSE(c)),
-        () =>
-          encoder.finished
-            ? []
-            : encoder.finishChunks("stop").map((c) => formatSSE(c)),
+        () => (encoder.finished ? [] : encoder.finishChunks("stop").map((c) => formatSSE(c))),
         // Stream-level error (TCP failure, idle timeout, encoder throw).
         // Always emit a uniform content+finish chunk pair via streamErrorChunks
         // — mixing a non-chunk `{error:...}` envelope with valid chunks
@@ -455,9 +453,7 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
         () =>
           encoder.finished
             ? []
-            : encoder
-                .finishRecords("end_turn")
-                .map((r) => formatAnthropicSSE(r.event, r.data)),
+            : encoder.finishRecords("end_turn").map((r) => formatAnthropicSSE(r.event, r.data)),
         (err) => {
           const records: AnthropicSSERecord[] = [
             {
