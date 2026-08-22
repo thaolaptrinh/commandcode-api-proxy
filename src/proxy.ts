@@ -6,6 +6,7 @@ import { saveApiKey, promptForApiKey, readAuthKey, deleteAuth } from "@/auth.js"
 import { setupOpenCodeConfig } from "@/setup/opencode.js";
 import { setupClaudeCodeConfig } from "@/setup/claude-code.js";
 import { logger, initLogger } from "@/logger.js";
+import { getProxyVersion } from "@/version.js";
 
 const args = process.argv.slice(2);
 
@@ -74,7 +75,7 @@ if (!config.apiKey) {
 const server = createServer(config);
 
 server.listen(config.port, config.host, () => {
-  console.log(`\n  Command Code API Proxy v${process.env.npm_package_version ?? "0.1.0"}`);
+  console.log(`\n  Command Code API Proxy v${getProxyVersion()}`);
   console.log(`  ${"=".repeat(50)}`);
   console.log(`  Listening on  http://${config.host}:${config.port}`);
   console.log(`  Auth: ${config.apiKey ? "ENABLED (Bearer token or x-api-key)" : "DISABLED"}`);

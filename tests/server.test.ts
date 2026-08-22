@@ -1,7 +1,12 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import http from "node:http";
+import { readFileSync } from "node:fs";
 import { loadConfig } from "@/config.js";
 import { createServer } from "@/server.js";
+
+const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as {
+  version: string;
+};
 
 describe("Server", () => {
   let server: http.Server;
@@ -32,11 +37,12 @@ describe("Server", () => {
     expect(body.error).toBe("Not found");
   });
 
-  it("returns health status", async () => {
+  it("returns health status with the real package version", async () => {
     const res = await fetch(`${baseUrl}/health`);
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
     expect(body.status).toBe("ok");
+    expect(body.version).toBe(pkg.version);
   });
 
   it("returns model list", async () => {
