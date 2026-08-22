@@ -242,7 +242,10 @@ export class OpenAIStreamEncoder {
    * a new one on first sighting. Falls back to the upstream-provided index
    * (if any) so we don't fight a bridge that already numbers them.
    */
-  private resolveToolCallIndex(toolCallId: string | undefined, upstreamIndex: number | undefined): number {
+  private resolveToolCallIndex(
+    toolCallId: string | undefined,
+    upstreamIndex: number | undefined,
+  ): number {
     if (toolCallId) {
       const known = this.toolCallIdToIndex.get(toolCallId);
       if (known !== undefined) return known;

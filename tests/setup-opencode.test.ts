@@ -4,11 +4,10 @@ import fs from "node:fs";
 
 describe("setupOpenCodeConfig", () => {
   let written: string | null = null;
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     written = null;
-    consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(fs, "existsSync").mockImplementation(() => false);
     vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined as unknown as string);
     vi.spyOn(fs, "writeFileSync").mockImplementation(((_path, data) => {

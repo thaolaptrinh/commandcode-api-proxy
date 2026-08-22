@@ -440,7 +440,10 @@ describe("buildNonStreamingResponse", () => {
   it("merges tool-call-delta + tool-call with the same id into one entry", () => {
     const events: CCEvent[] = [
       { type: "start", data: {} },
-      { type: "tool-call-delta", data: { toolCallId: "call_X", name: "search", arguments: '{"q":' } },
+      {
+        type: "tool-call-delta",
+        data: { toolCallId: "call_X", name: "search", arguments: '{"q":' },
+      },
       { type: "tool-call-delta", data: { toolCallId: "call_X", arguments: '"hi"}' } },
       { type: "tool-call", data: { toolCallId: "call_X", toolName: "search", input: { q: "hi" } } },
       { type: "finish", data: { finishReason: "tool-call" } },
