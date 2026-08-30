@@ -1,7 +1,7 @@
 // Model resolution, aliasing, and discovery against the CC provider API.
 
 import modelsData from "@/models.json" with { type: "json" };
-import { getCatalog, refreshCatalog } from "@/translate/catalog.js";
+import { getCatalog } from "@/translate/catalog.js";
 
 const BUILTIN_MODELS: string[] = modelsData.builtin;
 const SHORT_ALIASES: Record<string, string> = modelsData.shortAliases;
@@ -10,16 +10,6 @@ const REASONING_EFFORTS: Record<string, string[]> = modelsData.reasoningEfforts 
 
 /** Rank ordering of effort levels (low → max). Used to clip to the nearest valid. */
 const EFFORT_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
-
-/**
- * Fetch available open-source models from the CC provider API (closed models
- * are filtered out) and merge them into the catalog. Returns the merged model
- * list. Failures keep the current (static fallback) catalog.
- */
-export async function fetchModelList(apiBase: string, apiKey: string): Promise<string[]> {
-  const catalog = await refreshCatalog(apiBase, apiKey);
-  return catalog.ids;
-}
 
 export function getDefaultModels(): string[] {
   return getCatalog().ids;

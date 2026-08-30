@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupOpenCodeConfig } from "@/setup/opencode.js";
 import { __resetCatalogForTests } from "@/translate/catalog.js";
+import { mockCcModelsFetch } from "./helpers.js";
 import fs from "node:fs";
 
 // Never hit the real CC API or read the developer's saved auth during tests.
@@ -64,21 +65,10 @@ describe("setupOpenCodeConfig", () => {
   test("builds config from the live API catalog when a key is available", async () => {
     process.env.CC_API_KEY = "test-key";
     process.env.CC_API_BASE = "https://api.test-cc.example";
-    const realFetch = globalThis.fetch.bind(globalThis);
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-      const url = typeof input === "string" ? input : (input as Request).url ?? String(input);
-      if (!url.includes("/provider/v1/models")) return realFetch(input, init);
-      return new Response(
-        JSON.stringify({
-          object: "list",
-          data: [
-            { id: "claude-opus-5", name: "Claude Opus 5", context_length: 1000000 },
-            { id: "zai-org/GLM-5.3", name: "GLM-5.3", context_length: 1000000 },
-          ],
-        }),
-        { status: 200 },
-      ) as unknown as Response;
-    });
+    mockCcModelsFetch([
+      { id: "claude-opus-5", name: "Claude Opus 5", context_length: 1000000 },
+      { id: "zai-org/GLM-5.3", name: "GLM-5.3", context_length: 1000000 },
+    ]);
 
     await setupOpenCodeConfig("local");
     const config = JSON.parse(written as string);

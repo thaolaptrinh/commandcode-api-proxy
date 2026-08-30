@@ -9,24 +9,12 @@ import {
 import { resolveModel } from "@/translate/models.js";
 import { loadConfig } from "@/config.js";
 import { createServer } from "@/server.js";
+import { mockCcModelsFetch } from "./helpers.js";
 
 const API_BASE = "https://api.test-cc.example";
 const API_KEY = "test-key";
 
-function mockFetch(models: unknown, calls: { count: number } = { count: 0 }) {
-  const realFetch = globalThis.fetch.bind(globalThis);
-  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = typeof input === "string" ? input : (input as Request).url ?? String(input);
-    // Only intercept CC API calls; other fetches (e.g. hitting the test server
-    // itself) must go to the real network stack.
-    if (!url.includes("/provider/v1/models")) return realFetch(input, init);
-    calls.count += 1;
-    return new Response(JSON.stringify({ object: "list", data: models }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }) as unknown as Response;
-  });
-}
+const mockFetch = mockCcModelsFetch;
 
 const API_MODELS = [
   { id: "claude-opus-5", name: "Claude Opus 5", context_length: 1000000 },

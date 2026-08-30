@@ -45,11 +45,16 @@ function buildCatalog(models: CatalogModel[]): ModelCatalog {
   };
 }
 
+/** Best display name: API name → static name → bare last path segment. */
+function displayNameFor(id: string, apiName?: string): string {
+  return apiName ?? STATIC_NAMES[id] ?? id.split("/").pop() ?? id;
+}
+
 export function getStaticCatalog(): ModelCatalog {
   return buildCatalog(
     STATIC_BUILTIN.map((id) => ({
       id,
-      displayName: STATIC_NAMES[id] ?? id.split("/").pop() ?? id,
+      displayName: displayNameFor(id),
       contextWindow: STATIC_CONTEXT[id] ?? 128_000,
       source: "static" as const,
     })),
@@ -120,7 +125,7 @@ export async function refreshCatalog(
           const api = apiById.get(id);
           merged.push({
             id,
-            displayName: api?.name ?? STATIC_NAMES[id] ?? id.split("/").pop() ?? id,
+            displayName: displayNameFor(id, api?.name),
             contextWindow: api?.context_length ?? STATIC_CONTEXT[id] ?? 128_000,
             source: api ? "api" : "static",
           });
@@ -130,7 +135,7 @@ export async function refreshCatalog(
           if (seen.has(m.id)) continue;
           merged.push({
             id: m.id,
-            displayName: m.name ?? m.id.split("/").pop() ?? m.id,
+            displayName: displayNameFor(m.id, m.name),
             contextWindow: m.context_length ?? 128_000,
             source: "api",
           });
