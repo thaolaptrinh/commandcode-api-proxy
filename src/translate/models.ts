@@ -1,6 +1,7 @@
 // Model resolution, aliasing, and discovery against the CC provider API.
 
 import modelsData from "@/models.json" with { type: "json" };
+import { getCatalog, refreshCatalog } from "@/translate/catalog.js";
 
 const BUILTIN_MODELS: string[] = modelsData.builtin;
 const SHORT_ALIASES: Record<string, string> = modelsData.shortAliases;
@@ -11,32 +12,22 @@ const REASONING_EFFORTS: Record<string, string[]> = modelsData.reasoningEfforts 
 const EFFORT_RANK: Record<string, number> = { low: 0, medium: 1, high: 2, xhigh: 3, max: 4 };
 
 /**
- * Fetch available models from CC provider API. Returns the model list (used by
- * the /v1/models endpoint). Failures yield an empty list — the caller falls
- * back to the built-in defaults.
+ * Fetch available open-source models from the CC provider API (closed models
+ * are filtered out) and merge them into the catalog. Returns the merged model
+ * list. Failures keep the current (static fallback) catalog.
  */
 export async function fetchModelList(apiBase: string, apiKey: string): Promise<string[]> {
-  try {
-    const url = `${apiBase}/provider/v1/models`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return [];
-    const json = (await res.json()) as { data?: { id: string }[] };
-    return json.data?.map((m) => m.id) ?? [];
-  } catch {
-    return [];
-  }
+  const catalog = await refreshCatalog(apiBase, apiKey);
+  return catalog.ids;
 }
 
 export function getDefaultModels(): string[] {
-  return BUILTIN_MODELS;
+  return getCatalog().ids;
 }
 
 export function resolveModel(model: string): string {
   if (!model || model === "default") {
-    return BUILTIN_MODELS[0];
+    return getCatalog().ids[0] ?? BUILTIN_MODELS[0];
   }
   // Alias lookup is case-insensitive so callers can pass the bare model name
   // with original casing (e.g. "GLM-5.2") as well as the lowercase short alias.
@@ -46,9 +37,9 @@ export function resolveModel(model: string): string {
   if (model.includes("/")) return model;
   // Bare name without an org prefix (e.g. "GLM-5.2", "Kimi-K3", or
   // "nemotron-3-ultra-550b-a55b" — which has no short alias). Match it against
-  // the builtin catalog by last path segment so it still resolves to a full ID.
+  // the (dynamic) catalog by last path segment so it still resolves to a full ID.
   const lower = model.toLowerCase();
-  for (const id of BUILTIN_MODELS) {
+  for (const id of getCatalog().ids) {
     const last = id.split("/").pop() ?? id;
     if (last.toLowerCase() === lower) return id;
   }

@@ -1,12 +1,18 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from "vitest";
 import { setupOpenCodeConfig } from "@/setup/opencode.js";
+import { __resetCatalogForTests } from "@/translate/catalog.js";
 import fs from "node:fs";
+
+// Never hit the real CC API or read the developer's saved auth during tests.
+vi.mock("@/auth.js", () => ({ readAuthKey: () => null }));
 
 describe("setupOpenCodeConfig", () => {
   let written: string | null = null;
 
   beforeEach(() => {
     written = null;
+    __resetCatalogForTests();
+    delete process.env.CC_API_KEY;
     vi.spyOn(console, "log").mockImplementation(() => {});
     vi.spyOn(fs, "existsSync").mockImplementation(() => false);
     vi.spyOn(fs, "mkdirSync").mockImplementation(() => undefined as unknown as string);
@@ -16,6 +22,7 @@ describe("setupOpenCodeConfig", () => {
   });
 
   afterEach(() => {
+    delete process.env.CC_API_BASE;
     vi.restoreAllMocks();
   });
 
@@ -52,5 +59,34 @@ describe("setupOpenCodeConfig", () => {
 
     // models without discrete efforts get no variants field
     expect(models["Qwen3.7-Max"].variants).toBeUndefined();
+  });
+
+  test("builds config from the live API catalog when a key is available", async () => {
+    process.env.CC_API_KEY = "test-key";
+    process.env.CC_API_BASE = "https://api.test-cc.example";
+    const realFetch = globalThis.fetch.bind(globalThis);
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = typeof input === "string" ? input : (input as Request).url ?? String(input);
+      if (!url.includes("/provider/v1/models")) return realFetch(input, init);
+      return new Response(
+        JSON.stringify({
+          object: "list",
+          data: [
+            { id: "claude-opus-5", name: "Claude Opus 5", context_length: 1000000 },
+            { id: "zai-org/GLM-5.3", name: "GLM-5.3", context_length: 1000000 },
+          ],
+        }),
+        { status: 200 },
+      ) as unknown as Response;
+    });
+
+    await setupOpenCodeConfig("local");
+    const config = JSON.parse(written as string);
+    const models = config.provider.commandcode.models;
+
+    // Closed model filtered out; API-only model present with API metadata.
+    expect(models["claude-opus-5"]).toBeUndefined();
+    expect(models["GLM-5.3"].name).toBe("GLM-5.3");
+    expect(models["GLM-5.3"].limit).toEqual({ context: 1000000, output: 128000 });
   });
 });

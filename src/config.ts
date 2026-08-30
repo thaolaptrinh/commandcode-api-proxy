@@ -27,6 +27,7 @@ export interface Config {
  * server actively blocks requests whose version looks stale or absent.
  */
 export const DEFAULT_CC_VERSION = "0.40.3";
+export const DEFAULT_CC_API_BASE = "https://api.commandcode.ai";
 const CC_VERSION_REFRESH_MS = 24 * 60 * 60 * 1000;
 
 let cachedVersion: string | null = null;
@@ -83,7 +84,7 @@ export function loadConfig(): Config {
   const host = cli.host || process.env.HOST || "127.0.0.1";
   const port = parseInt(cli.port || process.env.PORT || "8787", 10);
   const apiKey = cli["api-key"] || process.env.CC_API_KEY || readAuthKey();
-  const ccApiBase = process.env.CC_API_BASE || "https://api.commandcode.ai";
+  const ccApiBase = process.env.CC_API_BASE || DEFAULT_CC_API_BASE;
   const ccVersion = process.env.CC_CLI_VERSION || cachedVersion || DEFAULT_CC_VERSION;
   const logLevel = process.env.LOG_LEVEL || "info";
   // `*` is fine for a localhost proxy; restrict (e.g. to an origin or leave
