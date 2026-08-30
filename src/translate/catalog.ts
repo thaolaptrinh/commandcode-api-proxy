@@ -137,7 +137,9 @@ export async function refreshCatalog(
           seen.add(id);
         }
         for (const m of open) {
+          // `seen` also absorbs duplicate ids within the API list itself.
           if (seen.has(m.id)) continue;
+          seen.add(m.id);
           merged.push({
             id: m.id,
             displayName: displayNameFor(m.id, m.name),

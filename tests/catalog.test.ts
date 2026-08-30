@@ -121,6 +121,19 @@ describe("refreshCatalog", () => {
     expect(catalog.models.find((m) => m.id === "deepseek/deepseek-v4-pro")?.source).toBe("api");
   });
 
+  it("absorbs duplicate ids within the API list itself", async () => {
+    const before = getCatalog().ids;
+    mockFetch([
+      { id: "neworg/Dup-Model", name: "Dup Model", context_length: 111 },
+      { id: "neworg/Dup-Model", name: "Dup Model", context_length: 222 },
+    ]);
+    const catalog = await refreshCatalog(API_BASE, API_KEY);
+    expect(catalog.ids.filter((id) => id === "neworg/Dup-Model")).toHaveLength(1);
+    expect(catalog.ids.length).toBe(before.length + 1);
+    // First occurrence wins.
+    expect(catalog.contextWindows["neworg/Dup-Model"]).toBe(111);
+  });
+
   it("tolerates malformed API payloads without corrupting the catalog", async () => {
     const before = getCatalog().ids;
 
