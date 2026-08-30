@@ -115,7 +115,12 @@ export async function refreshCatalog(
   inflight = (async () => {
     try {
       const apiModels = await fetchApiModels(apiBase, apiKey);
-      const open = apiModels.filter((m) => m.id && !isClosedModel(m.id));
+      // Tolerate junk entries (null items, missing ids) rather than letting
+      // one malformed record discard the whole refresh.
+      const open = apiModels.filter(
+        (m): m is ApiModel & { id: string } =>
+          typeof m === "object" && m !== null && typeof m.id === "string" && !isClosedModel(m.id),
+      );
       if (open.length > 0) {
         const apiById = new Map(open.map((m) => [m.id, m]));
         const merged: CatalogModel[] = [];

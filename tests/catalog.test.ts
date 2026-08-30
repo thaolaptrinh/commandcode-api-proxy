@@ -89,6 +89,57 @@ describe("refreshCatalog", () => {
     await refreshCatalog(API_BASE, API_KEY, { force: true });
     expect(calls.count).toBe(2);
   });
+
+  it("refetches once the TTL has elapsed", async () => {
+    const calls = { count: 0 };
+    mockFetch(API_MODELS, calls);
+    const now = vi.spyOn(Date, "now");
+    await refreshCatalog(API_BASE, API_KEY);
+    expect(calls.count).toBe(1);
+    // Jump past the 1h TTL.
+    now.mockReturnValue(Date.now() + 60 * 60 * 1000 + 1);
+    try {
+      await refreshCatalog(API_BASE, API_KEY);
+      expect(calls.count).toBe(2);
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("keeps static entries the API no longer lists (retired upstream models)", async () => {
+    // The payload only knows deepseek-v4-pro — every other static builtin
+    // model has "disappeared" from the API.
+    mockFetch([{ id: "deepseek/deepseek-v4-pro", name: "DeepSeek V4 Pro", context_length: 1 }]);
+    const catalog = await refreshCatalog(API_BASE, API_KEY);
+    const glm = catalog.models.find((m) => m.id === "zai-org/GLM-5.2");
+    expect(glm).toBeDefined();
+    expect(glm?.source).toBe("static");
+    // Static fallbacks fill in name + context when the API is silent.
+    expect(glm?.displayName).toBe("GLM-5.2");
+    expect(glm?.contextWindow).toBe(1048576);
+    // The one model the API still knows is flagged as api-sourced.
+    expect(catalog.models.find((m) => m.id === "deepseek/deepseek-v4-pro")?.source).toBe("api");
+  });
+
+  it("tolerates malformed API payloads without corrupting the catalog", async () => {
+    const before = getCatalog().ids;
+
+    // data: null
+    mockFetch(null);
+    expect((await refreshCatalog(API_BASE, API_KEY, { force: true })).ids).toEqual(before);
+
+    // items missing id are skipped; null context_length falls back
+    mockFetch([
+      null,
+      { name: "No Id Model" },
+      { id: "neworg/No-Context", name: "No Context", context_length: null },
+    ]);
+    const catalog = await refreshCatalog(API_BASE, API_KEY, { force: true });
+    expect(catalog.ids).toContain("neworg/No-Context");
+    expect(catalog.contextWindows["neworg/No-Context"]).toBe(128_000);
+    // The id-less entries never made it in.
+    expect(catalog.ids.length).toBe(before.length + 1);
+  });
 });
 
 describe("resolveModel against the dynamic catalog", () => {
