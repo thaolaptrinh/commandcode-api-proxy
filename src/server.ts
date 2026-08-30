@@ -8,7 +8,7 @@ import {
   AnthropicStreamEncoder,
   buildAnthropicResponse,
 } from "@/translate/anthropic.js";
-import { getDefaultModels, fetchModelList } from "@/translate/models.js";
+import { refreshCatalog, getCatalog } from "@/translate/catalog.js";
 import type { CCEvent } from "@/translate/types.js";
 import { formatSSE, formatSSEDone, formatAnthropicSSE } from "@/stream.js";
 import { sendToCC, collectEvents, UpstreamError } from "@/upstream.js";
@@ -26,12 +26,7 @@ import type { AnthropicRequest, AnthropicSSERecord } from "@/translate/anthropic
 // ──────────────────────────────────────────
 
 let config: Config;
-let modelList: string[] = getDefaultModels();
 let corsOrigin = "*";
-
-function updateModelList(models: string[]): void {
-  if (models.length > 0) modelList = models;
-}
 
 // ──────────────────────────────────────────
 // Request body parser
@@ -251,20 +246,21 @@ function handleModels(req: http.IncomingMessage, res: http.ServerResponse): void
   const isAnthropic = req.headers["anthropic-version"] !== undefined;
 
   if (isAnthropic) {
-    const items = modelList;
+    const catalog = getCatalog();
+    const items = catalog.models;
     const data = {
-      data: items.map((id: string) => ({
-        id,
+      data: items.map((m) => ({
+        id: m.id,
         type: "model" as const,
-        display_name: id,
+        display_name: m.displayName,
         created_at: new Date().toISOString(),
         max_input_tokens: null as number | null,
         max_tokens: null as number | null,
         capabilities: null,
       })),
       has_more: false,
-      first_id: items.length > 0 ? items[0] : null,
-      last_id: items.length > 0 ? items[items.length - 1] : null,
+      first_id: items.length > 0 ? items[0].id : null,
+      last_id: items.length > 0 ? items[items.length - 1].id : null,
     };
     sendJson(res, 200, data);
     return;
@@ -272,7 +268,7 @@ function handleModels(req: http.IncomingMessage, res: http.ServerResponse): void
 
   const data = {
     object: "list",
-    data: modelList.map((id: string) => ({
+    data: getCatalog().ids.map((id: string) => ({
       id,
       object: "model",
       created: Math.floor(Date.now() / 1000),
@@ -586,15 +582,12 @@ export function createServer(cfg: Config): http.Server {
   config = cfg;
   corsOrigin = cfg.corsOrigin;
 
-  // Start fetching model list in background (only if we have a key to use).
+  // Refresh the model catalog from the CC provider API in background (only if
+  // we have a key to use). On failure the static fallback stays in place.
   if (cfg.apiKey) {
-    fetchModelList(cfg.ccApiBase, cfg.apiKey)
-      .then((models) => {
-        if (models.length > 0) updateModelList(models);
-      })
-      .catch(() => {
-        /* keep defaults */
-      });
+    refreshCatalog(cfg.ccApiBase, cfg.apiKey).catch(() => {
+      /* keep defaults */
+    });
   }
 
   const routes: RouteEntry[] = [
