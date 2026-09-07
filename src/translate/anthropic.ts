@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { toolArgumentSuffix } from "./tool-arguments.js";
 import type {
   AnthropicRequest,
   AnthropicContentBlock,
@@ -245,8 +246,12 @@ export function toCCRequest(
 export class AnthropicStreamEncoder {
   readonly messageId: string;
   private blockIndex = 0;
+  private currentBlockIndex = 0;
   private currentBlockType: "text" | "thinking" | "tool_use" | null = null;
-  private currentToolCallId: string | null = null;
+  private readonly toolBlocks = new Map<
+    string,
+    { index: number; arguments: string; closed: boolean }
+  >();
   private pendingStart: CCEvent | null = null;
   private started = false;
   private pinged = false;
@@ -281,6 +286,7 @@ export class AnthropicStreamEncoder {
         records.push(this.makeMessageStart(0));
       }
       this.closeCurrentBlock(records);
+      this.closeToolBlocks(records);
       records.push({
         event: "error",
         data: { type: "error", error: { type: "api_error", message: msg } },
@@ -328,6 +334,7 @@ export class AnthropicStreamEncoder {
     }
 
     this.closeCurrentBlock(records);
+    this.closeToolBlocks(records);
 
     const finishReason = (event.data.finishReason as string) ?? "stop";
     const usage = extractUsage(event.data as Record<string, unknown>);
@@ -381,21 +388,18 @@ export class AnthropicStreamEncoder {
       case "tool-call-delta": {
         const tcId = (event.data.toolCallId as string) ?? "";
         const tcName = (event.data.name as string) ?? "";
-        if (this.currentBlockType !== "tool_use" || this.currentToolCallId !== tcId) {
-          this.closeCurrentBlock(records);
-          this.ensureBlockOpenWith(records, "tool_use", {
-            type: "tool_use",
-            id: tcId,
-            name: tcName,
-            input: {},
-          });
-          this.currentToolCallId = tcId;
-        }
+        const block = this.ensureToolBlock(records, tcId, tcName);
+        if (block.closed) throw new Error("Inconsistent upstream tool arguments");
+        const args = (event.data.arguments as string) ?? "";
+        block.arguments += args;
         records.push(
-          this.makeDelta({
-            type: "input_json_delta",
-            partial_json: (event.data.arguments as string) ?? "",
-          }),
+          this.makeDelta(
+            {
+              type: "input_json_delta",
+              partial_json: args,
+            },
+            block.index,
+          ),
         );
         break;
       }
@@ -406,31 +410,49 @@ export class AnthropicStreamEncoder {
         const input = event.data.input ?? event.data.arguments;
         const argsStr =
           typeof input === "string" ? input : input != null ? JSON.stringify(input) : "";
-        // If the upstream streamed deltas for this tool call first and then
-        // sent the final `tool-call` event with the same id, reuse the block
-        // it already opened instead of creating a duplicate `tool_use`.
-        if (this.currentBlockType === "tool_use" && this.currentToolCallId === tcId) {
-          if (argsStr) {
-            records.push(this.makeDelta({ type: "input_json_delta", partial_json: argsStr }));
-          }
-          break;
+        const block = this.ensureToolBlock(records, tcId, tcName);
+        const suffix = toolArgumentSuffix(block.arguments, argsStr);
+        if (suffix) {
+          if (block.closed) throw new Error("Inconsistent upstream tool arguments");
+          records.push(
+            this.makeDelta({ type: "input_json_delta", partial_json: suffix }, block.index),
+          );
+          block.arguments += suffix;
         }
-        this.closeCurrentBlock(records);
-        this.ensureBlockOpenWith(records, "tool_use", {
-          type: "tool_use",
-          id: tcId,
-          name: tcName,
-          input: {},
-        });
-        if (argsStr) {
-          records.push(this.makeDelta({ type: "input_json_delta", partial_json: argsStr }));
-        }
-        this.closeCurrentBlock(records);
+        this.closeToolBlock(records, block);
         break;
       }
     }
 
     return records;
+  }
+
+  private ensureToolBlock(records: AnthropicSSERecord[], id: string, name: string) {
+    const existing = this.toolBlocks.get(id);
+    if (existing) return existing;
+    this.closeCurrentBlock(records);
+    this.ensureBlockOpenWith(records, "tool_use", { type: "tool_use", id, name, input: {} });
+    const block = { index: this.currentBlockIndex, arguments: "", closed: false };
+    this.toolBlocks.set(id, block);
+    // Tool blocks have independent lifetimes: interleaved deltas retain indices.
+    this.currentBlockType = null;
+    return block;
+  }
+
+  private closeToolBlock(
+    records: AnthropicSSERecord[],
+    block: { index: number; closed: boolean },
+  ): void {
+    if (block.closed) return;
+    records.push({
+      event: "content_block_stop",
+      data: { type: "content_block_stop", index: block.index },
+    });
+    block.closed = true;
+  }
+
+  private closeToolBlocks(records: AnthropicSSERecord[]): void {
+    for (const block of this.toolBlocks.values()) this.closeToolBlock(records, block);
   }
 
   private ensureBlockOpen(
@@ -450,11 +472,12 @@ export class AnthropicStreamEncoder {
     block: ContentBlockStartShape,
   ): void {
     this.currentBlockType = type;
+    this.currentBlockIndex = this.blockIndex++;
     records.push({
       event: "content_block_start",
       data: {
         type: "content_block_start",
-        index: this.blockIndex,
+        index: this.currentBlockIndex,
         content_block: block,
       },
     });
@@ -477,17 +500,16 @@ export class AnthropicStreamEncoder {
 
     records.push({
       event: "content_block_stop",
-      data: { type: "content_block_stop", index: this.blockIndex },
+      data: { type: "content_block_stop", index: this.currentBlockIndex },
     });
 
-    this.blockIndex++;
     this.currentBlockType = null;
   }
 
-  private makeDelta(delta: DeltaShape): AnthropicSSERecord {
+  private makeDelta(delta: DeltaShape, index = this.currentBlockIndex): AnthropicSSERecord {
     return {
       event: "content_block_delta",
-      data: { type: "content_block_delta", index: this.blockIndex, delta },
+      data: { type: "content_block_delta", index, delta },
     };
   }
 
@@ -529,6 +551,7 @@ export class AnthropicStreamEncoder {
       this.started = true;
     }
     this.closeCurrentBlock(records);
+    this.closeToolBlocks(records);
     records.push({
       event: "message_delta",
       data: {
@@ -555,6 +578,9 @@ export function buildAnthropicResponse(
 
   for (const event of events) {
     switch (event.type) {
+      case "error":
+        // Do not turn failed generations (or private diagnostics) into content.
+        throw new Error("CC upstream generation failed");
       case "text-delta":
         textContent += (event.data.text as string) ?? "";
         break;

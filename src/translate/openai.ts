@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { toolArgumentSuffix } from "./tool-arguments.js";
 import type {
   OpenAIChatRequest,
   OpenAIMessage,
@@ -227,6 +228,26 @@ export class OpenAIStreamEncoder {
   // `index` field would all be assigned index 0 and the client would merge
   // them into a single tool call.
   private readonly toolCallIdToIndex = new Map<string, number>();
+  private readonly toolArguments = new Map<number, string>();
+  private readonly toolMetadata = new Map<number, { id?: string; name?: string }>();
+
+  private toolMetadataDelta(index: number, id?: string, name?: string) {
+    const seen = this.toolMetadata.get(index) ?? {};
+    const delta: { id?: string; type?: string; name?: string } = {};
+    for (const [field, value] of [["id", id], ["name", name]] as const) {
+      if (!value) continue;
+      if (seen[field] && seen[field] !== value) {
+        throw new Error("Inconsistent upstream tool metadata");
+      }
+      if (!seen[field]) {
+        seen[field] = value;
+        delta[field] = value;
+        if (field === "id") delta.type = "function";
+      }
+    }
+    this.toolMetadata.set(index, seen);
+    return delta;
+  }
 
   constructor(private readonly model: string) {
     this.id = crypto.randomUUID();
@@ -314,13 +335,18 @@ export class OpenAIStreamEncoder {
           index: this.resolveToolCallIndex(toolCallId, upstreamIndex),
           function: { arguments: (event.data.arguments as string) ?? "" },
         };
-        if (toolCallId) {
-          tc.id = toolCallId;
-          tc.type = "function";
+        const metadata = this.toolMetadataDelta(tc.index, toolCallId, event.data.name as string | undefined);
+        if (metadata.id) {
+          tc.id = metadata.id;
+          tc.type = metadata.type;
         }
-        if (event.data.name) {
-          tc.function.name = event.data.name as string;
+        if (metadata.name) {
+          tc.function.name = metadata.name;
         }
+        this.toolArguments.set(
+          tc.index,
+          (this.toolArguments.get(tc.index) ?? "") + tc.function.arguments,
+        );
         chunks.push({
           id,
           object: "chat.completion.chunk",
@@ -343,6 +369,10 @@ export class OpenAIStreamEncoder {
           toolCallId || undefined,
           (event.data.index as number) ?? undefined,
         );
+        const emitted = this.toolArguments.get(index) ?? "";
+        const suffix = toolArgumentSuffix(emitted, args);
+        this.toolArguments.set(index, emitted + suffix);
+        const { name, ...identity } = this.toolMetadataDelta(index, toolCallId, toolName);
         chunks.push({
           id,
           object: "chat.completion.chunk",
@@ -355,9 +385,8 @@ export class OpenAIStreamEncoder {
                 tool_calls: [
                   {
                     index,
-                    id: toolCallId,
-                    type: "function",
-                    function: { name: toolName, arguments: args },
+                    ...identity,
+                    function: { ...(name ? { name } : {}), arguments: suffix },
                   },
                 ],
               },
@@ -495,6 +524,9 @@ export function buildNonStreamingResponse(events: CCEvent[], model: string, id: 
 
   for (const event of events) {
     switch (event.type) {
+      case "error":
+        // Do not turn failed generations (or private diagnostics) into content.
+        throw new Error("CC upstream generation failed");
       case "text-delta":
         content += (event.data.text as string) ?? "";
         break;

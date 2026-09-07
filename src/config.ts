@@ -15,7 +15,7 @@ export interface Config {
   ccVersion: string;
   logLevel: string;
   corsOrigin: string;
-  /** Max wall-clock ms for upstream to send response headers + first byte. */
+  /** Per-attempt deadline for upstream headers and any non-2xx error body. */
   upstreamTimeoutMs: number;
   /** Max ms between consecutive chunks during streaming. 0 = disabled. */
   idleTimeoutMs: number;
@@ -92,7 +92,7 @@ export function loadConfig(): Config {
   const corsOrigin = process.env.CORS_ORIGIN ?? "*";
 
   // Upstream timeouts. The connection timeout covers the wall-clock time
-  // until the upstream returns response headers + first byte — bump it for
+  // until the upstream returns headers (and consumes any error body) — bump it for
   // slow reasoning models. The idle timeout catches stalled streams where
   // the upstream opened the connection but stopped sending chunks
   // mid-response (e.g. tool call hung on the upstream side). Set

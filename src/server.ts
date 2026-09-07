@@ -17,6 +17,7 @@ import { getProxyVersion } from "@/version.js";
 import {
   validateOpenAIChatRequest,
   validateAnthropicRequest,
+  validateCountTokensRequest,
   ValidationError,
 } from "@/translate/validation.js";
 import type { AnthropicRequest, AnthropicSSERecord } from "@/translate/anthropic-types.js";
@@ -159,22 +160,15 @@ function corsHeaders(): Record<string, string> {
 // Helpers
 // ──────────────────────────────────────────
 
-function abortOnClientDisconnect(
-  req: http.IncomingMessage,
-  res: http.ServerResponse,
-): AbortController {
+function abortOnClientDisconnect(res: http.ServerResponse): AbortController {
   const abort = new AbortController();
-  req.on("close", () => {
+  // IncomingMessage.close marks a completed upload, not a lost response client.
+  const onClose = (): void => {
     if (!res.writableEnded) abort.abort();
-  });
+  };
+  res.once("close", onClose);
+  if (res.destroyed) onClose();
   return abort;
-}
-
-function destroyStreamOnClientDisconnect(
-  req: http.IncomingMessage,
-  stream: NodeJS.ReadableStream,
-): void {
-  req.on("close", () => (stream as Readable).destroy());
 }
 
 /**
@@ -186,7 +180,17 @@ function writeSSE(res: http.ServerResponse, chunk: string): Promise<boolean> {
   if (res.writableEnded || res.destroyed) return Promise.resolve(false);
   if (res.write(chunk)) return Promise.resolve(true);
   return new Promise((resolve) => {
-    res.once("drain", () => resolve(!res.writableEnded && !res.destroyed));
+    const settle = (writable: boolean): void => {
+      res.off("drain", onDrain);
+      res.off("close", onClose);
+      res.off("error", onClose);
+      resolve(writable);
+    };
+    const onDrain = (): void => settle(!res.writableEnded && !res.destroyed);
+    const onClose = (): void => settle(false);
+    res.once("drain", onDrain);
+    res.once("close", onClose);
+    res.once("error", onClose);
   });
 }
 
@@ -214,7 +218,7 @@ async function pumpStream(
         // Encoder blew up — turn it into a stream error so the catch below
         // handles it uniformly instead of crashing the proxy.
         (stream as Readable).destroy(err as Error);
-        break;
+        throw err;
       }
       for (const chunk of chunks) {
         if (!(await writable(chunk))) return;
@@ -322,7 +326,7 @@ async function handleChatCompletions(
 
   const ccBody = toCCRequest(openAIReq);
 
-  const abort = abortOnClientDisconnect(req, res);
+  const abort = abortOnClientDisconnect(res);
 
   try {
     const result = await sendToCC(
@@ -366,13 +370,8 @@ async function handleChatCompletions(
         res.write(formatSSEDone());
         res.end();
       }
-      // No destroyStreamOnClientDisconnect here — by the time pumpStream
-      // returns the stream has already ended or errored, so the call would
-      // be a no-op. Mid-stream disconnects are handled by the abort signal
-      // (see abortOnClientDisconnect + nodeReaderToStream's abortSignal
-      // listener).
+      // The response abort signal covers both streaming and JSON clients.
     } else {
-      destroyStreamOnClientDisconnect(req, stream);
       const events = await collectEvents(stream);
       const response = buildNonStreamingResponse(events, model, encoder.id);
       sendJson(res, 200, response);
@@ -418,7 +417,7 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
   const encoder = new AnthropicStreamEncoder(model);
   const ccBody = anToCCRequest(anthropicReq);
 
-  const abort = abortOnClientDisconnect(req, res);
+  const abort = abortOnClientDisconnect(res);
 
   try {
     const result = await sendToCC(
@@ -462,10 +461,8 @@ async function handleMessages(req: http.IncomingMessage, res: http.ServerRespons
         },
       );
       if (!res.writableEnded && !res.destroyed) res.end();
-      // No destroyStreamOnClientDisconnect here — see OpenAI streaming path
-      // for rationale (abort signal already covers mid-stream disconnect).
+      // The response abort signal already covers mid-stream disconnects.
     } else {
-      destroyStreamOnClientDisconnect(req, stream);
       const events = await collectEvents(stream);
       const response = buildAnthropicResponse(events, model, encoder.messageId);
       res.writeHead(200, { "Content-Type": "application/json", ...corsHeaders() });
@@ -494,7 +491,17 @@ async function handleCountTokens(
     );
   }
 
-  const body = rawBody as Record<string, unknown>;
+  let body: Record<string, unknown>;
+  try {
+    body = validateCountTokensRequest(rawBody);
+  } catch (err) {
+    return sendAnthropicError(
+      res,
+      400,
+      "invalid_request_error",
+      err instanceof ValidationError ? err.message : "Invalid request body",
+    );
+  }
 
   const parts: string[] = [];
   if (typeof body.system === "string") parts.push(body.system);

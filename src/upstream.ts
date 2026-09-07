@@ -8,7 +8,7 @@ interface UpstreamOptions {
   apiBase: string;
   apiKey: string;
   ccVersion: string;
-  /** Wall-clock timeout for receiving response headers + first byte. */
+  /** Per-attempt deadline for headers and any non-2xx error body. */
   timeoutMs?: number;
   /** Max ms allowed between consecutive data chunks during streaming. */
   idleTimeoutMs?: number;
@@ -77,6 +77,45 @@ function generateTraceparent(): string {
  */
 const MAX_RETRIES = 2;
 const RETRY_BACKOFF_MS = 500;
+const MAX_ERROR_BODY_BYTES = 16 * 1024;
+
+/** Bound diagnostics independently of how (or whether) the peer ends its body. */
+async function readErrorBody(response: Response, signal: AbortSignal): Promise<string> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  let onAbort = (): void => {};
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(new Error("Error body read aborted"));
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    while (true) {
+      const { done, value } = await Promise.race([reader.read(), aborted]);
+      if (done) return Buffer.concat(chunks).toString("utf8");
+      if (size + value.byteLength >= MAX_ERROR_BODY_BYTES) {
+        // Do not return a prefix that could end halfway through a secret.
+        return "[error body truncated]";
+      }
+      chunks.push(value);
+      size += value.byteLength;
+    }
+  } catch {
+    return "[error body unavailable]";
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    // Never wait on an uncooperative underlying cancel implementation.
+    void reader.cancel?.().catch(() => {});
+    reader.releaseLock?.();
+  }
+}
+
+function sanitizeErrorText(text: string, apiKey: string): string {
+  const redacted = apiKey ? text.replaceAll(apiKey, "[redacted]") : text;
+  return redacted.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "");
+}
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
@@ -106,6 +145,7 @@ export async function sendToCC(
   let lastError: UpstreamError | null = null;
 
   for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+    if (signal?.aborted) throw new UpstreamError("Request aborted", 0, false);
     // Per-attempt timeout so one dead connection can't burn the whole budget.
     const controller = new AbortController();
     const combinedSignal = signal ? combineSignals(signal, controller.signal) : controller.signal;
@@ -118,13 +158,13 @@ export async function sendToCC(
         body: JSON.stringify(body),
         signal: combinedSignal,
       });
-      clearTimeout(timeout);
-
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
+        const errorText = await readErrorBody(response, combinedSignal);
+        clearTimeout(timeout);
+        if (signal?.aborted) throw new UpstreamError("Request aborted", 0, false);
         const retryable = response.status >= 500 || response.status === 429;
         lastError = new UpstreamError(
-          `CC API ${response.status}: ${errorText || response.statusText}`,
+          `CC API ${response.status}: ${sanitizeErrorText(errorText || response.statusText, apiKey)}`,
           response.status,
           retryable,
         );
@@ -136,6 +176,8 @@ export async function sendToCC(
         throw lastError;
       }
 
+      // Successful generation remains governed by the separate idle timeout.
+      clearTimeout(timeout);
       if (!response.body) {
         throw new UpstreamError("CC API returned no body", 0, true);
       }
@@ -148,14 +190,13 @@ export async function sendToCC(
       };
     } catch (err) {
       clearTimeout(timeout);
+      if (signal?.aborted) throw new UpstreamError("Request aborted", 0, false);
       if (err instanceof UpstreamError) throw err;
 
       // Distinguish a client-initiated abort (caller is gone — never retry, it
       // only wastes a request) from a timeout/network blip (retryable).
       const aborted = (err as Error).name === "AbortError";
-      if (aborted && signal?.aborted) {
-        throw new UpstreamError("Request aborted", 0, true);
-      }
+
       lastError = new UpstreamError(
         aborted ? "Upstream timeout" : `Upstream request failed: ${(err as Error).message}`,
         0,
@@ -245,11 +286,9 @@ function nodeReaderToStream(
     idleTimer = setTimeout(() => {
       const err = new Error(`CC upstream idle timeout: no data for ${idleMs}ms`);
       err.name = "IdleTimeoutError";
-      // Cancel the reader — pending read() will reject with this reason.
-      const cancel = (reader as { cancel?: (reason?: unknown) => Promise<void> }).cancel;
-      if (typeof cancel === "function") {
-        cancel.call(reader, err).catch(() => {});
-      }
+      // Native reader.cancel() resolves pending reads as EOF. Destroy the
+      // Node stream explicitly so consumers see an error, not silent success.
+      stream.destroy(err);
     }, idleMs);
     // Don't keep the event loop alive just for the idle timer.
     idleTimer.unref?.();
@@ -264,13 +303,13 @@ function nodeReaderToStream(
   // Release the underlying reader when the consumer destroys this stream
   // (e.g. client disconnected). Otherwise CC keeps generating tokens nobody
   // will read, burning the user's quota until upstream's own timeout fires.
-  const releaseReader = (): void => {
+  const releaseReader = (reason?: Error | null): void => {
     disarmIdle();
     if (readerReleased) return;
     readerReleased = true;
-    const cancel = (reader as { cancel?: () => Promise<void> }).cancel;
+    const cancel = (reader as { cancel?: (reason?: unknown) => Promise<void> }).cancel;
     if (typeof cancel === "function") {
-      cancel.call(reader).catch(() => {
+      cancel.call(reader, reason).catch(() => {
         /* already closed */
       });
     }
@@ -280,7 +319,7 @@ function nodeReaderToStream(
     objectMode: true,
     emitClose: true,
     destroy(err, cb) {
-      releaseReader();
+      releaseReader(err);
       cb(err);
     },
     async read() {
@@ -304,6 +343,7 @@ function nodeReaderToStream(
           armIdle();
           const { done, value } = await reader.read();
           disarmIdle();
+          if (this.destroyed) return;
           if (done) {
             upstreamDone = true;
             releaseReader();
@@ -337,7 +377,7 @@ function nodeReaderToStream(
   if (opts.abortSignal) {
     const sig = opts.abortSignal;
     if (sig.aborted) {
-      releaseReader();
+      stream.destroy(new Error("Client disconnected"));
     } else {
       sig.addEventListener(
         "abort",

@@ -43,6 +43,53 @@ export function validateOpenAIChatRequest(body: unknown): OpenAIChatRequest {
 
 // ── Anthropic validation ──
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Validate only fields consumed by the local estimator, not generation fields. */
+export function validateCountTokensRequest(body: unknown): Record<string, unknown> {
+  if (!isRecord(body)) throw new ValidationError("Request body must be a JSON object");
+  if (body.system !== undefined && typeof body.system !== "string") {
+    if (
+      !Array.isArray(body.system) ||
+      !body.system.every((b) => isRecord(b) && (b.text === undefined || typeof b.text === "string"))
+    ) {
+      throw new ValidationError("Field 'system' must be a string or array of text blocks");
+    }
+  }
+  if (body.messages !== undefined) {
+    if (
+      !Array.isArray(body.messages) ||
+      !body.messages.every(
+        (m) =>
+          isRecord(m) &&
+          (typeof m.content === "string" ||
+            (Array.isArray(m.content) && m.content.every(isRecord))),
+      )
+    ) {
+      throw new ValidationError(
+        "Field 'messages' must contain objects with string or block-array content",
+      );
+    }
+  }
+  if (body.tools !== undefined) {
+    if (
+      !Array.isArray(body.tools) ||
+      !body.tools.every(
+        (t) =>
+          isRecord(t) &&
+          (t.name === undefined || typeof t.name === "string") &&
+          (t.description === undefined || typeof t.description === "string") &&
+          (t.input_schema === undefined || isRecord(t.input_schema)),
+      )
+    ) {
+      throw new ValidationError("Field 'tools' must be an array of tool objects");
+    }
+  }
+  return body;
+}
+
 const UNSUPPORTED_CONTENT_TYPES = new Set([
   "document",
   "search_result",
